@@ -17,10 +17,14 @@ async def get_cloudflare_public_keys():
     
     if _cf_public_keys is None:
         certs_url = f"https://{CF_TEAM_DOMAIN}/cdn-cgi/access/certs"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(certs_url)
-            response.raise_for_status()
-            _cf_public_keys = response.json()
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(certs_url)
+                response.raise_for_status()
+                _cf_public_keys = response.json()
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            print(f"Cloudflare証明書取得エラー: {e}")
+            raise
     
     return _cf_public_keys
 
