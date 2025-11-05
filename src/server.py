@@ -3,6 +3,8 @@ from typing import Optional
 import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from src.auth import verify_cloudflare_jwt
 
 # FastMCPサーバーを初期化
 mcp = FastMCP("Sequential Thinking MCP Server")
@@ -89,6 +91,46 @@ def thinking_guidance() -> str:
 
 # FastAPI アプリケーションを作成
 app = FastAPI(title="Sequential Thinking MCP Server", version="1.0.0")
+
+# CORS設定
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        os.getenv("CLOUDFLARE_WORKER_URL", "https://*.workers.dev")
+    ],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+# 認証ミドルウェア
+@app.middleware("http")
+async def authenticate_cloudflare(request: Request, call_next):
+    """全リクエストでCloudflare JWT認証"""
+    
+    # ヘルスチェックは除外
+    if request.url.path in ["/health", "/", "/docs"]:
+        return await call_next(request)
+    
+    # JWT取得
+    jwt_token = request.headers.get("CF-Access-Jwt-Assertion")
+    
+    if not jwt_token:
+        raise HTTPException(
+            status_code=401,
+            detail="CF-Access-Jwt-Assertion header required"
+        )
+    
+    # JWT検証
+    is_valid = await verify_cloudflare_jwt(jwt_token)
+    
+    if not is_valid:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid Cloudflare Access token"
+        )
+    
+    response = await call_next(request)
+    return response
 
 @app.get("/")
 async def root():
