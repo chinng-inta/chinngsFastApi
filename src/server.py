@@ -1,6 +1,8 @@
 from fastmcp import FastMCP
 from typing import Optional
 import os
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 # FastMCPサーバーを初期化
 mcp = FastMCP("Sequential Thinking MCP Server")
@@ -85,6 +87,49 @@ def thinking_guidance() -> str:
     5. Express uncertainty and explore alternatives
     """
 
+# FastAPI アプリケーションを作成
+app = FastAPI(title="Sequential Thinking MCP Server", version="1.0.0")
+
+@app.get("/")
+async def root():
+    """Root endpoint for health check."""
+    return {"message": "Sequential Thinking MCP Server is running", "status": "healthy"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy", "server": "Sequential Thinking MCP Server"}
+
+@app.get("/tools")
+async def list_tools():
+    """List available MCP tools."""
+    return {
+        "tools": [
+            {
+                "name": "sequentialthinking",
+                "description": "Sequential thinking tool for step-by-step reasoning"
+            },
+            {
+                "name": "get_server_info", 
+                "description": "Get information about the MCP server"
+            }
+        ]
+    }
+
+@app.post("/mcp")
+async def handle_mcp_request(request: Request):
+    """Handle MCP protocol requests."""
+    try:
+        body = await request.json()
+        # MCPリクエストを処理
+        response = await mcp.handle_request(body)
+        return response
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"MCP request failed: {str(e)}"}
+        )
+
 if __name__ == "__main__":
-    # FastMCPの組み込みサーバーを起動
-    mcp.run()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
