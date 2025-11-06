@@ -290,13 +290,115 @@ async def handle_mcp_request(mcp_request: MCPRequest):
     """
     try:
         body = mcp_request.dict()
-        # MCPリクエストを処理
-        response = await mcp.handle_request(body)
-        return response
+        method = body.get("method", "")
+        params = body.get("params", {})
+        request_id = body.get("id", "1")
+        
+        # MCPメソッドに応じて処理を分岐
+        if method == "tools/call":
+            tool_name = params.get("name")
+            arguments = params.get("arguments", {})
+            
+            if tool_name == "sequentialthinking":
+                # sequentialthinking ツールを直接呼び出し
+                result = sequentialthinking(**arguments)
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": result
+                            }
+                        ]
+                    }
+                }
+            elif tool_name == "get_server_info":
+                # get_server_info ツールを直接呼び出し
+                result = get_server_info()
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text", 
+                                "text": str(result)
+                            }
+                        ]
+                    }
+                }
+            else:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32601,
+                            "message": f"Unknown tool: {tool_name}"
+                        }
+                    }
+                )
+        
+        elif method == "tools/list":
+            # ツール一覧を返す
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "tools": [
+                        {
+                            "name": "sequentialthinking",
+                            "description": "Sequential thinking tool for step-by-step reasoning",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "thought": {"type": "string"},
+                                    "thought_number": {"type": "integer"},
+                                    "total_thoughts": {"type": "integer"},
+                                    "next_thought_needed": {"type": "boolean"}
+                                },
+                                "required": ["thought", "thought_number", "total_thoughts", "next_thought_needed"]
+                            }
+                        },
+                        {
+                            "name": "get_server_info",
+                            "description": "Get information about the MCP server",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {}
+                            }
+                        }
+                    ]
+                }
+            }
+        
+        else:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32601,
+                        "message": f"Unknown method: {method}"
+                    }
+                }
+            )
+            
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content={"error": f"MCP request failed: {str(e)}"}
+            content={
+                "jsonrpc": "2.0",
+                "id": mcp_request.id,
+                "error": {
+                    "code": -32603,
+                    "message": f"Internal error: {str(e)}"
+                }
+            }
         )
 
 @app.get("/debug/dns", response_model=DNSDebugResponse, tags=["Debug"])
