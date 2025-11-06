@@ -252,18 +252,15 @@ async def list_tools():
     このサーバーで利用可能なMCPツールの一覧を返します。
     各ツールの名前と説明が含まれます。
     """
-    return {
-        "tools": [
-            {
-                "name": "sequentialthinking",
-                "description": "Sequential thinking tool for step-by-step reasoning"
-            },
-            {
-                "name": "get_server_info", 
-                "description": "Get information about the MCP server"
-            }
-        ]
-    }
+    # FastMCPサーバーから動的にツール一覧を取得
+    tools_list = []
+    for tool in mcp._tools.values():
+        tools_list.append({
+            "name": tool.name,
+            "description": tool.description or f"Tool: {tool.name}"
+        })
+    
+    return {"tools": tools_list}
 
 @app.post("/mcp", tags=["MCP"])
 async def handle_mcp_request(mcp_request: MCPRequest):
@@ -300,36 +297,46 @@ async def handle_mcp_request(mcp_request: MCPRequest):
             tool_name = params.get("name")
             arguments = params.get("arguments", {})
             
-            if tool_name == "sequentialthinking":
-                # sequentialthinking ツールを直接呼び出し
-                result = sequentialthinking(**arguments)
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": result
-                            }
-                        ]
+            # FastMCPサーバーから利用可能なツールを取得
+            available_tools = {}
+            for tool in mcp._tools.values():
+                available_tools[tool.name] = tool
+            
+            if tool_name in available_tools:
+                try:
+                    # FastMCPツールを正しく呼び出し
+                    tool = available_tools[tool_name]
+                    if hasattr(tool, 'func'):
+                        # 関数を直接呼び出し
+                        result = tool.func(**arguments)
+                    else:
+                        # ツールオブジェクトから関数を取得
+                        result = await tool(**arguments) if hasattr(tool, '__call__') else str(tool)
+                    
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": str(result)
+                                }
+                            ]
+                        }
                     }
-                }
-            elif tool_name == "get_server_info":
-                # get_server_info ツールを直接呼び出し
-                result = get_server_info()
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {
-                        "content": [
-                            {
-                                "type": "text", 
-                                "text": str(result)
+                except Exception as tool_error:
+                    return JSONResponse(
+                        status_code=500,
+                        content={
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "error": {
+                                "code": -32603,
+                                "message": f"Tool execution error: {str(tool_error)}"
                             }
-                        ]
-                    }
-                }
+                        }
+                    )
             else:
                 return JSONResponse(
                     status_code=400,
@@ -338,41 +345,37 @@ async def handle_mcp_request(mcp_request: MCPRequest):
                         "id": request_id,
                         "error": {
                             "code": -32601,
-                            "message": f"Unknown tool: {tool_name}"
+                            "message": f"Unknown tool: {tool_name}. Available tools: {list(available_tools.keys())}"
                         }
                     }
                 )
         
         elif method == "tools/list":
-            # ツール一覧を返す
+            # FastMCPサーバーから動的にツール一覧を生成
+            tools_list = []
+            for tool in mcp._tools.values():
+                tool_info = {
+                    "name": tool.name,
+                    "description": tool.description or f"Tool: {tool.name}",
+                }
+                
+                # スキーマがある場合は追加
+                if hasattr(tool, 'input_schema') and tool.input_schema:
+                    tool_info["inputSchema"] = tool.input_schema
+                else:
+                    # デフォルトスキーマ
+                    tool_info["inputSchema"] = {
+                        "type": "object",
+                        "properties": {}
+                    }
+                
+                tools_list.append(tool_info)
+            
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "result": {
-                    "tools": [
-                        {
-                            "name": "sequentialthinking",
-                            "description": "Sequential thinking tool for step-by-step reasoning",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "thought": {"type": "string"},
-                                    "thought_number": {"type": "integer"},
-                                    "total_thoughts": {"type": "integer"},
-                                    "next_thought_needed": {"type": "boolean"}
-                                },
-                                "required": ["thought", "thought_number", "total_thoughts", "next_thought_needed"]
-                            }
-                        },
-                        {
-                            "name": "get_server_info",
-                            "description": "Get information about the MCP server",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {}
-                            }
-                        }
-                    ]
+                    "tools": tools_list
                 }
             }
         
@@ -433,6 +436,30 @@ async def debug_dns():
             result["error"] = str(e)
     
     return result
+
+@app.get("/debug/mcp-tools", tags=["Debug"])
+async def debug_mcp_tools():
+    """
+    FastMCPツールのデバッグ情報
+    
+    登録されているFastMCPツールの詳細情報を表示します。
+    """
+    tools_debug = {}
+    
+    for tool_name, tool in mcp._tools.items():
+        tools_debug[tool_name] = {
+            "name": tool.name,
+            "description": tool.description,
+            "type": str(type(tool)),
+            "has_func": hasattr(tool, 'func'),
+            "has_call": hasattr(tool, '__call__'),
+            "attributes": [attr for attr in dir(tool) if not attr.startswith('_')]
+        }
+    
+    return {
+        "total_tools": len(mcp._tools),
+        "tools": tools_debug
+    }
 
 if __name__ == "__main__":
     import uvicorn
