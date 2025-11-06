@@ -3,6 +3,7 @@ from typing import Optional
 import os
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from src.auth import verify_cloudflare_jwt
 
@@ -90,7 +91,89 @@ def thinking_guidance() -> str:
     """
 
 # FastAPI アプリケーションを作成
-app = FastAPI(title="Sequential Thinking MCP Server", version="1.0.0")
+app = FastAPI(
+    title="Sequential Thinking MCP Server",
+    version="1.0.0",
+    description="""
+    ## Sequential Thinking MCP Server
+
+    このサーバーは段階的思考（Sequential Thinking）をサポートするMCP（Model Context Protocol）サーバーです。
+
+    ### 主な機能
+    - **Sequential Thinking**: 複雑な問題を段階的に分析・解決
+    - **MCP Protocol**: `/mcp`エンドポイントでMCPリクエストを処理
+    - **Cloudflare Access**: JWT認証による安全なアクセス制御
+
+    ### 利用可能なツール
+    - `sequentialthinking`: 段階的思考プロセスの実行
+    - `get_server_info`: サーバー情報の取得
+
+    ### 認証
+    本番環境では Cloudflare Access による JWT 認証が必要です。
+    開発環境では認証をスキップします。
+    """,
+    contact={
+        "name": "Sequential Thinking MCP Server",
+        "url": "https://github.com/your-repo",
+    },
+    license_info={
+        "name": "MIT License",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+# Pydanticモデル定義
+class MCPRequest(BaseModel):
+    """MCP リクエストのスキーマ"""
+    method: str
+    params: dict = {}
+    id: str = "1"
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "method": "tools/call",
+                "params": {
+                    "name": "sequentialthinking",
+                    "arguments": {
+                        "thought": "最初の思考ステップ",
+                        "thought_number": 1,
+                        "total_thoughts": 3,
+                        "next_thought_needed": True
+                    }
+                },
+                "id": "1"
+            }
+        }
+
+class HealthResponse(BaseModel):
+    """ヘルスチェックレスポンス"""
+    status: str
+    server: str
+
+class RootResponse(BaseModel):
+    """ルートエンドポイントレスポンス"""
+    message: str
+    status: str
+
+class ToolInfo(BaseModel):
+    """ツール情報"""
+    name: str
+    description: str
+
+class ToolsResponse(BaseModel):
+    """ツール一覧レスポンス"""
+    tools: list[ToolInfo]
+
+class DNSDebugResponse(BaseModel):
+    """DNS デバッグレスポンス"""
+    cf_team_domain: str = None
+    dns_resolution: bool
+    cert_fetch: bool
+    key_count: int = 0
+    error: str = None
 
 # CORS設定
 app.add_middleware(
@@ -107,8 +190,8 @@ app.add_middleware(
 async def authenticate_cloudflare(request: Request, call_next):
     """全リクエストでCloudflare JWT認証"""
     
-    # ヘルスチェックは除外
-    if request.url.path in ["/health", "/", "/docs"]:
+    # ヘルスチェックとドキュメントは除外
+    if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json", "/debug/dns"]:
         return await call_next(request)
     
     # 開発環境では認証をスキップ
@@ -141,19 +224,33 @@ async def authenticate_cloudflare(request: Request, call_next):
     response = await call_next(request)
     return response
 
-@app.get("/")
+@app.get("/", response_model=RootResponse, tags=["Health"])
 async def root():
-    """Root endpoint for health check."""
+    """
+    ルートエンドポイント
+    
+    サーバーの基本的な状態を確認するためのエンドポイントです。
+    """
     return {"message": "Sequential Thinking MCP Server is running", "status": "healthy"}
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
-    """Health check endpoint."""
+    """
+    ヘルスチェックエンドポイント
+    
+    サーバーの健康状態を確認します。
+    ロードバランサーやモニタリングシステムで使用されます。
+    """
     return {"status": "healthy", "server": "Sequential Thinking MCP Server"}
 
-@app.get("/tools")
+@app.get("/tools", response_model=ToolsResponse, tags=["MCP"])
 async def list_tools():
-    """List available MCP tools."""
+    """
+    利用可能なMCPツール一覧
+    
+    このサーバーで利用可能なMCPツールの一覧を返します。
+    各ツールの名前と説明が含まれます。
+    """
     return {
         "tools": [
             {
@@ -167,11 +264,32 @@ async def list_tools():
         ]
     }
 
-@app.post("/mcp")
-async def handle_mcp_request(request: Request):
-    """Handle MCP protocol requests."""
+@app.post("/mcp", tags=["MCP"])
+async def handle_mcp_request(mcp_request: MCPRequest):
+    """
+    MCPプロトコルリクエスト処理
+    
+    Model Context Protocol (MCP) のリクエストを処理します。
+    
+    ### 使用例
+    ```json
+    {
+        "method": "tools/call",
+        "params": {
+            "name": "sequentialthinking",
+            "arguments": {
+                "thought": "最初の思考ステップ",
+                "thought_number": 1,
+                "total_thoughts": 3,
+                "next_thought_needed": true
+            }
+        },
+        "id": "1"
+    }
+    ```
+    """
     try:
-        body = await request.json()
+        body = mcp_request.dict()
         # MCPリクエストを処理
         response = await mcp.handle_request(body)
         return response
@@ -180,6 +298,38 @@ async def handle_mcp_request(request: Request):
             status_code=500,
             content={"error": f"MCP request failed: {str(e)}"}
         )
+
+@app.get("/debug/dns", response_model=DNSDebugResponse, tags=["Debug"])
+async def debug_dns():
+    """
+    DNS解決とCloudflare接続テスト
+    
+    Cloudflare Access の DNS 解決と証明書取得をテストします。
+    認証の問題をデバッグする際に使用してください。
+    """
+    from src.auth import CF_TEAM_DOMAIN, test_dns_resolution, get_cloudflare_public_keys
+    
+    result = {
+        "cf_team_domain": CF_TEAM_DOMAIN,
+        "dns_resolution": False,
+        "cert_fetch": False,
+        "error": None
+    }
+    
+    if CF_TEAM_DOMAIN:
+        try:
+            # DNS解決テスト
+            result["dns_resolution"] = await test_dns_resolution(CF_TEAM_DOMAIN)
+            
+            # 証明書取得テスト
+            certs = await get_cloudflare_public_keys()
+            result["cert_fetch"] = len(certs.get('keys', [])) > 0
+            result["key_count"] = len(certs.get('keys', []))
+            
+        except Exception as e:
+            result["error"] = str(e)
+    
+    return result
 
 if __name__ == "__main__":
     import uvicorn
