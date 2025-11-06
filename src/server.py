@@ -4,6 +4,7 @@ import os
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from typing import Optional, List
 from fastapi.middleware.cors import CORSMiddleware
 from src.auth import verify_cloudflare_jwt
 
@@ -129,7 +130,7 @@ class MCPRequest(BaseModel):
     """MCP リクエストのスキーマ"""
     method: str
     params: dict = {}
-    id: str = "1"
+    id: Optional[str] = "1"
     
     class Config:
         schema_extra = {
@@ -165,15 +166,15 @@ class ToolInfo(BaseModel):
 
 class ToolsResponse(BaseModel):
     """ツール一覧レスポンス"""
-    tools: list[ToolInfo]
+    tools: List[ToolInfo]
 
 class DNSDebugResponse(BaseModel):
     """DNS デバッグレスポンス"""
-    cf_team_domain: str = None
+    cf_team_domain: Optional[str] = None
     dns_resolution: bool
     cert_fetch: bool
     key_count: int = 0
-    error: str = None
+    error: Optional[str] = None
 
 # CORS設定
 app.add_middleware(
@@ -393,7 +394,7 @@ async def handle_mcp_request(mcp_request: MCPRequest):
             status_code=500,
             content={
                 "jsonrpc": "2.0",
-                "id": mcp_request.id,
+                "id": mcp_request.id if mcp_request.id else "unknown",
                 "error": {
                     "code": -32603,
                     "message": f"Internal error: {str(e)}"
