@@ -252,15 +252,18 @@ async def list_tools():
     このサーバーで利用可能なMCPツールの一覧を返します。
     各ツールの名前と説明が含まれます。
     """
-    # FastMCPサーバーから動的にツール一覧を取得
-    tools_list = []
-    for tool in mcp._tools.values():
-        tools_list.append({
-            "name": tool.name,
-            "description": tool.description or f"Tool: {tool.name}"
-        })
-    
-    return {"tools": tools_list}
+    return {
+        "tools": [
+            {
+                "name": "sequentialthinking",
+                "description": "Sequential thinking tool for step-by-step reasoning"
+            },
+            {
+                "name": "get_server_info",
+                "description": "Get information about the MCP server"
+            }
+        ]
+    }
 
 @app.post("/mcp", tags=["MCP"])
 async def handle_mcp_request(mcp_request: MCPRequest):
@@ -297,22 +300,37 @@ async def handle_mcp_request(mcp_request: MCPRequest):
             tool_name = params.get("name")
             arguments = params.get("arguments", {})
             
-            # FastMCPサーバーから利用可能なツールを取得
-            available_tools = {}
-            for tool in mcp._tools.values():
-                available_tools[tool.name] = tool
-            
-            if tool_name in available_tools:
+            # 登録されているツールを直接呼び出し
+            if tool_name == "sequentialthinking":
                 try:
-                    # FastMCPツールを正しく呼び出し
-                    tool = available_tools[tool_name]
-                    if hasattr(tool, 'func'):
-                        # 関数を直接呼び出し
-                        result = tool.func(**arguments)
-                    else:
-                        # ツールオブジェクトから関数を取得
-                        result = await tool(**arguments) if hasattr(tool, '__call__') else str(tool)
-                    
+                    result = sequentialthinking(**arguments)
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": str(result)
+                                }
+                            ]
+                        }
+                    }
+                except Exception as tool_error:
+                    return JSONResponse(
+                        status_code=500,
+                        content={
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "error": {
+                                "code": -32603,
+                                "message": f"Tool execution error: {str(tool_error)}"
+                            }
+                        }
+                    )
+            elif tool_name == "get_server_info":
+                try:
+                    result = get_server_info()
                     return {
                         "jsonrpc": "2.0",
                         "id": request_id,
@@ -345,31 +363,69 @@ async def handle_mcp_request(mcp_request: MCPRequest):
                         "id": request_id,
                         "error": {
                             "code": -32601,
-                            "message": f"Unknown tool: {tool_name}. Available tools: {list(available_tools.keys())}"
+                            "message": f"Unknown tool: {tool_name}. Available tools: ['sequentialthinking', 'get_server_info']"
                         }
                     }
                 )
         
         elif method == "tools/list":
-            # FastMCPサーバーから動的にツール一覧を生成
-            tools_list = []
-            for tool in mcp._tools.values():
-                tool_info = {
-                    "name": tool.name,
-                    "description": tool.description or f"Tool: {tool.name}",
-                }
-                
-                # スキーマがある場合は追加
-                if hasattr(tool, 'input_schema') and tool.input_schema:
-                    tool_info["inputSchema"] = tool.input_schema
-                else:
-                    # デフォルトスキーマ
-                    tool_info["inputSchema"] = {
+            # ツール一覧を返す
+            tools_list = [
+                {
+                    "name": "sequentialthinking",
+                    "description": "Sequential thinking tool for step-by-step reasoning",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "thought": {
+                                "type": "string",
+                                "description": "Current thinking step"
+                            },
+                            "thought_number": {
+                                "type": "integer",
+                                "description": "Current thought number (1-indexed)"
+                            },
+                            "total_thoughts": {
+                                "type": "integer",
+                                "description": "Estimated total thoughts needed"
+                            },
+                            "next_thought_needed": {
+                                "type": "boolean",
+                                "description": "Whether another thought is needed"
+                            },
+                            "is_revision": {
+                                "type": "boolean",
+                                "description": "Whether this revises previous thinking"
+                            },
+                            "revises_thought": {
+                                "type": "integer",
+                                "description": "Which thought number is being reconsidered"
+                            },
+                            "branch_from_thought": {
+                                "type": "integer",
+                                "description": "Branching point thought number"
+                            },
+                            "branch_id": {
+                                "type": "string",
+                                "description": "Branch identifier"
+                            },
+                            "needs_more_thoughts": {
+                                "type": "boolean",
+                                "description": "If more thoughts are needed"
+                            }
+                        },
+                        "required": ["thought", "thought_number", "total_thoughts", "next_thought_needed"]
+                    }
+                },
+                {
+                    "name": "get_server_info",
+                    "description": "Get information about the MCP server",
+                    "inputSchema": {
                         "type": "object",
                         "properties": {}
                     }
-                
-                tools_list.append(tool_info)
+                }
+            ]
             
             return {
                 "jsonrpc": "2.0",
@@ -444,21 +500,23 @@ async def debug_mcp_tools():
     
     登録されているFastMCPツールの詳細情報を表示します。
     """
-    tools_debug = {}
-    
-    for tool_name, tool in mcp._tools.items():
-        tools_debug[tool_name] = {
-            "name": tool.name,
-            "description": tool.description,
-            "type": str(type(tool)),
-            "has_func": hasattr(tool, 'func'),
-            "has_call": hasattr(tool, '__call__'),
-            "attributes": [attr for attr in dir(tool) if not attr.startswith('_')]
-        }
-    
     return {
-        "total_tools": len(mcp._tools),
-        "tools": tools_debug
+        "total_tools": 2,
+        "tools": {
+            "sequentialthinking": {
+                "name": "sequentialthinking",
+                "description": "Sequential thinking tool for step-by-step reasoning",
+                "registered": True,
+                "callable": callable(sequentialthinking)
+            },
+            "get_server_info": {
+                "name": "get_server_info",
+                "description": "Get information about the MCP server",
+                "registered": True,
+                "callable": callable(get_server_info)
+            }
+        },
+        "mcp_attributes": [attr for attr in dir(mcp) if not attr.startswith('_')]
     }
 
 if __name__ == "__main__":
