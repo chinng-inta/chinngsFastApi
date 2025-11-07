@@ -16,7 +16,7 @@ INTERNAL_SERVICES = {
 async def call_mcp_sse(service_url: str, method: str, params: dict) -> dict:
     """SSEトランスポートを使用してMCPサーバーを呼び出す"""
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=150.0) as client:
             # SSEエンドポイントにPOSTリクエストを送信
             mcp_request = {
                 "jsonrpc": "2.0",
