@@ -10,7 +10,7 @@ from src.auth import verify_cloudflare_jwt
 from fastapi_mcp import FastApiMCP
 
 INTERNAL_SERVICES = {
-    "sequentialthinking": os.getenv("SEQUENTIALTHINKING_SERVICE_URL", "http://sequentialthinking.railway.internal")
+    "sequentialthinking": os.getenv("SEQUENTIALTHINKING_SERVICE_URL", "http://sequentialthinking.railway.internal:8080")
 }
 
 async def call_mcp_sse(service_url: str, method: str, params: dict) -> dict:
@@ -306,6 +306,54 @@ async def debug_dns():
             
         except Exception as e:
             result["error"] = str(e)
+    
+    return result
+
+@app.get("/debug/sequentialthinking", tags=["Debug"])
+async def debug_sequentialthinking():
+    """
+    SequentialThinkingサービスへの接続テスト
+    
+    内部サービスへの接続をテストします。
+    """
+    service_url = INTERNAL_SERVICES["sequentialthinking"]
+    
+    result = {
+        "service_url": service_url,
+        "health_check": False,
+        "sse_endpoint": False,
+        "error": None
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # ヘルスチェック
+            try:
+                health_response = await client.get(f"{service_url}/health")
+                result["health_check"] = health_response.status_code == 200
+                result["health_response"] = health_response.json() if health_response.status_code == 200 else None
+            except Exception as e:
+                result["health_error"] = str(e)
+            
+            # SSEエンドポイントテスト
+            try:
+                sse_response = await client.post(
+                    f"{service_url}/sse",
+                    json={
+                        "jsonrpc": "2.0",
+                        "method": "tools/list",
+                        "params": {},
+                        "id": 1
+                    },
+                    headers={"Accept": "text/event-stream"}
+                )
+                result["sse_endpoint"] = sse_response.status_code == 200
+                result["sse_response_preview"] = sse_response.text[:200] if sse_response.status_code == 200 else None
+            except Exception as e:
+                result["sse_error"] = str(e)
+                
+    except Exception as e:
+        result["error"] = str(e)
     
     return result
 
