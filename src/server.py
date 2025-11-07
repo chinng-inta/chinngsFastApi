@@ -24,9 +24,10 @@ async def call_mcp_sse(service_url: str, method: str, params: dict) -> dict:
                 "params": params,
                 "id": 1
             }
-            
+            sse_url = f"{service_url}/sse"
+            print(sse_url)
             response = await client.post(
-                f"{service_url}/sse",
+                sse_url,
                 json=mcp_request,
                 headers={
                     "Content-Type": "application/json",
