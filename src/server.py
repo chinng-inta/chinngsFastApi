@@ -1,11 +1,16 @@
 from typing import Optional, List
 import os
+import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from src.auth import verify_cloudflare_jwt
 from fastapi_mcp import FastApiMCP
+
+INTERNAL_SERVICES = {
+    "sequentialthinking": os.getenv("SEQUENTIALTHINKING_SERVICE_URL", "http://sequentialthinking.railway.internal")
+}
 
 # FastAPI アプリケーションを作成
 app = FastAPI(
@@ -154,25 +159,51 @@ async def sequentialthinking(request: SequentialThinkingRequest):
     Sequential thinking tool for step-by-step reasoning.
     
     このツールは複雑な問題を段階的に分析・解決するための思考プロセスをサポートします。
+    内部的にsequentialthinkingサービスを呼び出します。
     """
-    result = f"✓ Thought {request.thought_number}/{request.total_thoughts} recorded\n"
-    result += f"Content: {request.thought}\n"
+    service_url = INTERNAL_SERVICES["sequentialthinking"]
     
-    if request.is_revision and request.revises_thought:
-        result += f"📝 Revising thought #{request.revises_thought}\n"
-    
-    if request.branch_from_thought and request.branch_id:
-        result += f"🌿 Branching from thought #{request.branch_from_thought} (branch: {request.branch_id})\n"
-    
-    if request.needs_more_thoughts:
-        result += "⚠️ More thoughts needed beyond initial estimate\n"
-    
-    if request.next_thought_needed:
-        result += "➡️ Continue to next thought\n"
-    else:
-        result += "✅ Thinking process complete\n"
-    
-    return {"result": result}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{service_url}/mcp",
+                json={
+                    "method": "tools/call",
+                    "params": {
+                        "name": "sequentialthinking",
+                        "arguments": request.model_dump()
+                    },
+                    "id": "1"
+                }
+            )
+            response.raise_for_status()
+            
+            # MCPレスポンスから結果を抽出
+            mcp_response = response.json()
+            if "result" in mcp_response and "content" in mcp_response["result"]:
+                content = mcp_response["result"]["content"]
+                if content and len(content) > 0:
+                    result_text = content[0].get("text", "")
+                    return {"result": result_text}
+            
+            # フォールバック: レスポンス全体を返す
+            return {"result": str(mcp_response)}
+            
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to connect to sequentialthinking service: {str(e)}"
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Sequentialthinking service error: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal error: {str(e)}"
+        )
 
 @app.get("/server_info", response_model=ServerInfoResponse, tags=["MCP Tools"])
 async def get_server_info():
