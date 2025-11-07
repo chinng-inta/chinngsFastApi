@@ -254,7 +254,7 @@ async def list_tools():
     """
     # FastMCPサーバーから動的にツール一覧を取得
     tools_list = []
-    for tool in mcp._tools.values():
+    for tool in mcp.tools.values():
         tools_list.append({
             "name": tool.name,
             "description": tool.description or f"Tool: {tool.name}"
@@ -446,7 +446,7 @@ async def debug_mcp_tools():
     """
     tools_debug = {}
     
-    for tool_name, tool in mcp._tools.items():
+    for tool_name, tool in mcp.tools.items():
         tools_debug[tool_name] = {
             "name": tool.name,
             "description": tool.description,
