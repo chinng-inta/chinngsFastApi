@@ -290,7 +290,7 @@ async def handle_mcp_request(mcp_request: MCPRequest):
     ```
     """
     try:
-        body = mcp_request.dict()
+        body = mcp_request.model_dump()
         method = body.get("method", "")
         params = body.get("params", {})
         request_id = body.get("id", "1")
@@ -299,11 +299,12 @@ async def handle_mcp_request(mcp_request: MCPRequest):
         if method == "tools/call":
             tool_name = params.get("name")
             arguments = params.get("arguments", {})
-            
+            tool = mcp.get_tool(tool_name)
             # 登録されているツールを直接呼び出し
             if tool_name == "sequentialthinking":
                 try:
-                    result = sequentialthinking(**arguments)
+                    # result = sequentialthinking(**arguments)
+                    result = tool.run()
                     return {
                         "jsonrpc": "2.0",
                         "id": request_id,
@@ -330,7 +331,8 @@ async def handle_mcp_request(mcp_request: MCPRequest):
                     )
             elif tool_name == "get_server_info":
                 try:
-                    result = get_server_info()
+                    # result = get_server_info()
+                    result = tool.run()
                     return {
                         "jsonrpc": "2.0",
                         "id": request_id,
