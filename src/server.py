@@ -1,10 +1,8 @@
-from fastmcp import FastMCP
-from typing import Optional
+from typing import Optional, List
 import os
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional, List
 from fastapi.middleware.cors import CORSMiddleware
 from src.auth import verify_cloudflare_jwt
 from fastapi_mcp import FastApiMCP
@@ -23,10 +21,6 @@ app = FastAPI(
     - **MCP Protocol**: `/mcp`エンドポイントでMCPリクエストを処理
     - **Cloudflare Access**: JWT認証による安全なアクセス制御
 
-    ### 利用可能なツール
-    - `sequentialthinking`: 段階的思考プロセスの実行
-    - `get_server_info`: サーバー情報の取得
-
     ### 認証
     本番環境では Cloudflare Access による JWT 認証が必要です。
     開発環境では認証をスキップします。
@@ -43,114 +37,29 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# FastMCPサーバーを初期化
-#mcp = FastMCP("Sequential Thinking MCP Server")
-mcp = FastApiMCP(app)
-mcp.mount_http()
-
-# Sequential Thinkingツールの定義
-@mcp.tool()
-def sequentialthinking(
-    thought: str,
-    thought_number: int,
-    total_thoughts: int,
-    next_thought_needed: bool,
-    is_revision: bool = False,
-    revises_thought: Optional[int] = None,
-    branch_from_thought: Optional[int] = None,
-    branch_id: Optional[str] = None,
-    needs_more_thoughts: bool = False
-) -> str:
-    """
-    Sequential thinking tool for step-by-step reasoning.
-    
-    Args:
-        thought: Current thinking step
-        thought_number: Current thought number (1-indexed)
-        total_thoughts: Estimated total thoughts needed
-        next_thought_needed: Whether another thought is needed
-        is_revision: Whether this revises previous thinking
-        revises_thought: Which thought number is being reconsidered
-        branch_from_thought: Branching point thought number
-        branch_id: Branch identifier
-        needs_more_thoughts: If more thoughts are needed
-    
-    Returns:
-        Confirmation message with thought details
-    """
-    
-    result = f"✓ Thought {thought_number}/{total_thoughts} recorded\n"
-    result += f"Content: {thought}\n"
-    
-    if is_revision and revises_thought:
-        result += f"📝 Revising thought #{revises_thought}\n"
-    
-    if branch_from_thought and branch_id:
-        result += f"🌿 Branching from thought #{branch_from_thought} (branch: {branch_id})\n"
-    
-    if needs_more_thoughts:
-        result += "⚠️ More thoughts needed beyond initial estimate\n"
-    
-    if next_thought_needed:
-        result += "➡️ Continue to next thought\n"
-    else:
-        result += "✅ Thinking process complete\n"
-    
-    return result
-
-# サーバー情報ツール
-@mcp.tool()
-def get_server_info() -> dict:
-    """Get information about the MCP server."""
-    return {
-        "name": "Sequential Thinking MCP Server",
-        "version": "1.0.0",
-        "environment": os.getenv("RAILWAY_ENVIRONMENT", "development"),
-        "tools": ["sequentialthinking", "get_server_info"]
-    }
-
-# リソース定義（オプション）
-@mcp.resource("server://info")
-def server_info_resource() -> str:
-    """Server information resource."""
-    return "Sequential Thinking MCP Server running on Railway"
-
-# プロンプト定義（オプション）
-@mcp.prompt()
-def thinking_guidance() -> str:
-    """Guidance for using sequential thinking."""
-    return """
-    Sequential Thinking Guidelines:
-    1. Start with initial estimate of needed thoughts
-    2. Break down complex problems into steps
-    3. Question or revise previous thoughts when needed
-    4. Add more thoughts if needed, even at the "end"
-    5. Express uncertainty and explore alternatives
-    """
-
 # Pydanticモデル定義
-class MCPRequest(BaseModel):
-    """MCP リクエストのスキーマ"""
-    method: str
-    params: dict = {}
-    id: Optional[str] = "1"
-    
-    class Config:
-        schema_extra = {
-            "example": {
-                "method": "tools/call",
-                "params": {
-                    "name": "sequentialthinking",
-                    "arguments": {
-                        "thought": "最初の思考ステップ",
-                        "thought_number": 1,
-                        "total_thoughts": 3,
-                        "next_thought_needed": True
-                    }
-                },
-                "id": "1"
-            }
-        }
+class SequentialThinkingRequest(BaseModel):
+    """Sequential Thinking リクエスト"""
+    thought: str
+    thought_number: int
+    total_thoughts: int
+    next_thought_needed: bool
+    is_revision: bool = False
+    revises_thought: Optional[int] = None
+    branch_from_thought: Optional[int] = None
+    branch_id: Optional[str] = None
+    needs_more_thoughts: bool = False
+
+class SequentialThinkingResponse(BaseModel):
+    """Sequential Thinking レスポンス"""
+    result: str
+
+class ServerInfoResponse(BaseModel):
+    """サーバー情報レスポンス"""
+    name: str
+    version: str
+    environment: str
+    tools: List[str]
 
 class HealthResponse(BaseModel):
     """ヘルスチェックレスポンス"""
@@ -161,15 +70,6 @@ class RootResponse(BaseModel):
     """ルートエンドポイントレスポンス"""
     message: str
     status: str
-
-class ToolInfo(BaseModel):
-    """ツール情報"""
-    name: str
-    description: str
-
-class ToolsResponse(BaseModel):
-    """ツール一覧レスポンス"""
-    tools: List[ToolInfo]
 
 class DNSDebugResponse(BaseModel):
     """DNS デバッグレスポンス"""
@@ -194,7 +94,7 @@ app.add_middleware(
 async def authenticate_cloudflare(request: Request, call_next):
     """全リクエストでCloudflare JWT認証"""
     
-    # ヘルスチェックとドキュメントは除外
+    # ヘルスチェックとドキュメントのみ除外（MCPエンドポイントは認証対象）
     if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json", "/debug/dns"]:
         return await call_next(request)
     
@@ -247,224 +147,46 @@ async def health_check():
     """
     return {"status": "healthy", "server": "Sequential Thinking MCP Server"}
 
-@app.get("/tools", response_model=ToolsResponse, tags=["MCP"])
-async def list_tools():
+# MCPツールとして公開されるエンドポイント
+@app.post("/sequentialthinking", response_model=SequentialThinkingResponse, tags=["MCP Tools"])
+async def sequentialthinking(request: SequentialThinkingRequest):
     """
-    利用可能なMCPツール一覧
+    Sequential thinking tool for step-by-step reasoning.
     
-    このサーバーで利用可能なMCPツールの一覧を返します。
-    各ツールの名前と説明が含まれます。
+    このツールは複雑な問題を段階的に分析・解決するための思考プロセスをサポートします。
+    """
+    result = f"✓ Thought {request.thought_number}/{request.total_thoughts} recorded\n"
+    result += f"Content: {request.thought}\n"
+    
+    if request.is_revision and request.revises_thought:
+        result += f"📝 Revising thought #{request.revises_thought}\n"
+    
+    if request.branch_from_thought and request.branch_id:
+        result += f"🌿 Branching from thought #{request.branch_from_thought} (branch: {request.branch_id})\n"
+    
+    if request.needs_more_thoughts:
+        result += "⚠️ More thoughts needed beyond initial estimate\n"
+    
+    if request.next_thought_needed:
+        result += "➡️ Continue to next thought\n"
+    else:
+        result += "✅ Thinking process complete\n"
+    
+    return {"result": result}
+
+@app.get("/server_info", response_model=ServerInfoResponse, tags=["MCP Tools"])
+async def get_server_info():
+    """
+    Get information about the MCP server.
+    
+    サーバーの基本情報を取得します。
     """
     return {
-        "tools": [
-            {
-                "name": "sequentialthinking",
-                "description": "Sequential thinking tool for step-by-step reasoning"
-            },
-            {
-                "name": "get_server_info",
-                "description": "Get information about the MCP server"
-            }
-        ]
+        "name": "Sequential Thinking MCP Server",
+        "version": "1.0.0",
+        "environment": os.getenv("RAILWAY_ENVIRONMENT", "development"),
+        "tools": ["sequentialthinking", "get_server_info"]
     }
-
-@app.post("/mcp", tags=["MCP"])
-async def handle_mcp_request(mcp_request: MCPRequest):
-    """
-    MCPプロトコルリクエスト処理
-    
-    Model Context Protocol (MCP) のリクエストを処理します。
-    
-    ### 使用例
-    ```json
-    {
-        "method": "tools/call",
-        "params": {
-            "name": "sequentialthinking",
-            "arguments": {
-                "thought": "最初の思考ステップ",
-                "thought_number": 1,
-                "total_thoughts": 3,
-                "next_thought_needed": true
-            }
-        },
-        "id": "1"
-    }
-    ```
-    """
-    try:
-        body = mcp_request.model_dump()
-        method = body.get("method", "")
-        params = body.get("params", {})
-        request_id = body.get("id", "1")
-        
-        # MCPメソッドに応じて処理を分岐
-        if method == "tools/call":
-            tool_name = params.get("name")
-            arguments = params.get("arguments", {})
-            tool = mcp.get_tool(tool_name)
-            # 登録されているツールを直接呼び出し
-            if tool_name == "sequentialthinking":
-                try:
-                    # result = sequentialthinking(**arguments)
-                    result = tool.run()
-                    return {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": str(result)
-                                }
-                            ]
-                        }
-                    }
-                except Exception as tool_error:
-                    return JSONResponse(
-                        status_code=500,
-                        content={
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "error": {
-                                "code": -32603,
-                                "message": f"Tool execution error: {str(tool_error)}"
-                            }
-                        }
-                    )
-            elif tool_name == "get_server_info":
-                try:
-                    # result = get_server_info()
-                    result = tool.run()
-                    return {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": str(result)
-                                }
-                            ]
-                        }
-                    }
-                except Exception as tool_error:
-                    return JSONResponse(
-                        status_code=500,
-                        content={
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "error": {
-                                "code": -32603,
-                                "message": f"Tool execution error: {str(tool_error)}"
-                            }
-                        }
-                    )
-            else:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "error": {
-                            "code": -32601,
-                            "message": f"Unknown tool: {tool_name}. Available tools: ['sequentialthinking', 'get_server_info']"
-                        }
-                    }
-                )
-        
-        elif method == "tools/list":
-            # ツール一覧を返す
-            tools_list = [
-                {
-                    "name": "sequentialthinking",
-                    "description": "Sequential thinking tool for step-by-step reasoning",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "thought": {
-                                "type": "string",
-                                "description": "Current thinking step"
-                            },
-                            "thought_number": {
-                                "type": "integer",
-                                "description": "Current thought number (1-indexed)"
-                            },
-                            "total_thoughts": {
-                                "type": "integer",
-                                "description": "Estimated total thoughts needed"
-                            },
-                            "next_thought_needed": {
-                                "type": "boolean",
-                                "description": "Whether another thought is needed"
-                            },
-                            "is_revision": {
-                                "type": "boolean",
-                                "description": "Whether this revises previous thinking"
-                            },
-                            "revises_thought": {
-                                "type": "integer",
-                                "description": "Which thought number is being reconsidered"
-                            },
-                            "branch_from_thought": {
-                                "type": "integer",
-                                "description": "Branching point thought number"
-                            },
-                            "branch_id": {
-                                "type": "string",
-                                "description": "Branch identifier"
-                            },
-                            "needs_more_thoughts": {
-                                "type": "boolean",
-                                "description": "If more thoughts are needed"
-                            }
-                        },
-                        "required": ["thought", "thought_number", "total_thoughts", "next_thought_needed"]
-                    }
-                },
-                {
-                    "name": "get_server_info",
-                    "description": "Get information about the MCP server",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                }
-            ]
-            
-            return {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "tools": tools_list
-                }
-            }
-        
-        else:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "error": {
-                        "code": -32601,
-                        "message": f"Unknown method: {method}"
-                    }
-                }
-            )
-            
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "jsonrpc": "2.0",
-                "id": mcp_request.id if mcp_request.id else "unknown",
-                "error": {
-                    "code": -32603,
-                    "message": f"Internal error: {str(e)}"
-                }
-            }
-        )
 
 @app.get("/debug/dns", response_model=DNSDebugResponse, tags=["Debug"])
 async def debug_dns():
@@ -498,31 +220,9 @@ async def debug_dns():
     
     return result
 
-@app.get("/debug/mcp-tools", tags=["Debug"])
-async def debug_mcp_tools():
-    """
-    FastMCPツールのデバッグ情報
-    
-    登録されているFastMCPツールの詳細情報を表示します。
-    """
-    return {
-        "total_tools": 2,
-        "tools": {
-            "sequentialthinking": {
-                "name": "sequentialthinking",
-                "description": "Sequential thinking tool for step-by-step reasoning",
-                "registered": True,
-                "callable": callable(sequentialthinking)
-            },
-            "get_server_info": {
-                "name": "get_server_info",
-                "description": "Get information about the MCP server",
-                "registered": True,
-                "callable": callable(get_server_info)
-            }
-        },
-        "mcp_attributes": [attr for attr in dir(mcp) if not attr.startswith('_')]
-    }
+# FastApiMCPを初期化してマウント
+mcp = FastApiMCP(app)
+mcp.mount()
 
 if __name__ == "__main__":
     import uvicorn
