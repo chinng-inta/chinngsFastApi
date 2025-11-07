@@ -1,5 +1,6 @@
 from typing import Optional, List
 import os
+import json
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -11,6 +12,66 @@ from fastapi_mcp import FastApiMCP
 INTERNAL_SERVICES = {
     "sequentialthinking": os.getenv("SEQUENTIALTHINKING_SERVICE_URL", "http://sequentialthinking.railway.internal")
 }
+
+async def call_mcp_sse(service_url: str, method: str, params: dict) -> dict:
+    """SSEトランスポートを使用してMCPサーバーを呼び出す"""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # SSEエンドポイントにPOSTリクエストを送信
+            mcp_request = {
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": params,
+                "id": 1
+            }
+            
+            response = await client.post(
+                f"{service_url}/sse",
+                json=mcp_request,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream"
+                }
+            )
+            response.raise_for_status()
+            
+            # SSEレスポンスをパース
+            lines = response.text.strip().split('\n')
+            result = None
+            
+            for line in lines:
+                if line.startswith('data: '):
+                    data_str = line[6:]  # "data: " を除去
+                    try:
+                        data = json.loads(data_str)
+                        if 'result' in data:
+                            result = data
+                        elif 'error' in data:
+                            raise HTTPException(
+                                status_code=500,
+                                detail=f"MCP error: {data['error']}"
+                            )
+                    except json.JSONDecodeError:
+                        continue
+            
+            if result:
+                return result
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail="No valid response from MCP server"
+                )
+                
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to connect to MCP service: {str(e)}"
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"MCP service error: {str(e)}"
+        )
 
 # FastAPI アプリケーションを作成
 app = FastAPI(
@@ -159,46 +220,43 @@ async def sequentialthinking(request: SequentialThinkingRequest):
     Sequential thinking tool for step-by-step reasoning.
     
     このツールは複雑な問題を段階的に分析・解決するための思考プロセスをサポートします。
-    内部的にsequentialthinkingサービスを呼び出します。
+    内部的にSSEトランスポートでsequentialthinkingサービスを呼び出します。
     """
     service_url = INTERNAL_SERVICES["sequentialthinking"]
     
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{service_url}/mcp",
-                json={
-                    "method": "tools/call",
-                    "params": {
-                        "name": "sequentialthinking",
-                        "arguments": request.model_dump()
-                    },
-                    "id": "1"
+        # SSEトランスポートでMCPサーバーを呼び出し
+        mcp_response = await call_mcp_sse(
+            service_url=service_url,
+            method="tools/call",
+            params={
+                "name": "sequentialthinking",
+                "arguments": {
+                    "thought": request.thought,
+                    "thoughtNumber": request.thought_number,
+                    "totalThoughts": request.total_thoughts,
+                    "nextThoughtNeeded": request.next_thought_needed,
+                    "isRevision": request.is_revision,
+                    "revisesThought": request.revises_thought,
+                    "branchFromThought": request.branch_from_thought,
+                    "branchId": request.branch_id,
+                    "needsMoreThoughts": request.needs_more_thoughts
                 }
-            )
-            response.raise_for_status()
-            
-            # MCPレスポンスから結果を抽出
-            mcp_response = response.json()
-            if "result" in mcp_response and "content" in mcp_response["result"]:
-                content = mcp_response["result"]["content"]
-                if content and len(content) > 0:
-                    result_text = content[0].get("text", "")
-                    return {"result": result_text}
-            
-            # フォールバック: レスポンス全体を返す
-            return {"result": str(mcp_response)}
-            
-    except httpx.RequestError as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Failed to connect to sequentialthinking service: {str(e)}"
+            }
         )
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            status_code=e.response.status_code,
-            detail=f"Sequentialthinking service error: {str(e)}"
-        )
+        
+        # MCPレスポンスから結果を抽出
+        if "result" in mcp_response and "content" in mcp_response["result"]:
+            content = mcp_response["result"]["content"]
+            if content and len(content) > 0:
+                result_text = content[0].get("text", "")
+                return {"result": result_text}
+        
+        # フォールバック: レスポンス全体を返す
+        return {"result": json.dumps(mcp_response, indent=2)}
+        
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
