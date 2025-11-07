@@ -33,6 +33,7 @@ async def call_mcp_sse(service_url: str, method: str, params: dict) -> dict:
                     "Accept": "text/event-stream"
                 }
             )
+            print(f"Wait for Response")
             response.raise_for_status()
             
             # SSEレスポンスをパース
@@ -46,6 +47,7 @@ async def call_mcp_sse(service_url: str, method: str, params: dict) -> dict:
                         data = json.loads(data_str)
                         if 'result' in data:
                             result = data
+                            print(f"result:{result}")
                         elif 'error' in data:
                             raise HTTPException(
                                 status_code=500,
@@ -201,6 +203,7 @@ async def root():
     
     サーバーの基本的な状態を確認するためのエンドポイントです。
     """
+    print(f"/")
     return {"message": "Sequential Thinking MCP Server is running", "status": "healthy"}
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
@@ -211,6 +214,7 @@ async def health_check():
     サーバーの健康状態を確認します。
     ロードバランサーやモニタリングシステムで使用されます。
     """
+    print(f"/health")
     return {"status": "healthy", "server": "Sequential Thinking MCP Server"}
 
 # MCPツールとして公開されるエンドポイント
@@ -223,7 +227,9 @@ async def sequentialthinking(request: SequentialThinkingRequest):
     内部的にSSEトランスポートでsequentialthinkingサービスを呼び出します。
     """
     service_url = INTERNAL_SERVICES["sequentialthinking"]
-    
+    print(f"/sequentialthinking")
+    print(f"{service_url}")
+    print(f"{request}")
     try:
         # SSEトランスポートでMCPサーバーを呼び出し
         mcp_response = await call_mcp_sse(
@@ -249,6 +255,7 @@ async def sequentialthinking(request: SequentialThinkingRequest):
         if "result" in mcp_response and "content" in mcp_response["result"]:
             content = mcp_response["result"]["content"]
             if content and len(content) > 0:
+                print(f"{content}")
                 result_text = content[0].get("text", "")
                 return {"result": result_text}
         
@@ -270,6 +277,7 @@ async def get_server_info():
     
     サーバーの基本情報を取得します。
     """
+    print(f"/server_info")
     return {
         "name": "Sequential Thinking MCP Server",
         "version": "1.0.0",
@@ -287,6 +295,7 @@ async def debug_dns():
     """
     from src.auth import CF_TEAM_DOMAIN, test_dns_resolution, get_cloudflare_public_keys
     
+    print(f"/debug/dns")
     result = {
         "cf_team_domain": CF_TEAM_DOMAIN,
         "dns_resolution": False,
@@ -317,7 +326,9 @@ async def debug_sequentialthinking():
     内部サービスへの接続をテストします。
     """
     service_url = INTERNAL_SERVICES["sequentialthinking"]
-    
+    print(f"/debug/sequentialthinking")
+    print(f"{service_url}")
+
     result = {
         "service_url": service_url,
         "health_check": False,
