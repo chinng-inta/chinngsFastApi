@@ -1,5 +1,6 @@
 from typing import Optional, List
 import os
+import json
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -9,7 +10,7 @@ from src.auth import verify_cloudflare_jwt
 from fastapi_mcp import FastApiMCP
 
 INTERNAL_SERVICES = {
-    "sequentialthinking": os.getenv("SEQUENTIALTHINKING_SERVICE_URL", "http://sequentialthinking.railway.internal")
+    "sequentialthinking": os.getenv("SEQUENTIALTHINKING_SERVICE_URL", "http://sequentialthinking.railway.internal:8080")
 }
 
 # FastAPI アプリケーションを作成
@@ -140,6 +141,7 @@ async def root():
     
     サーバーの基本的な状態を確認するためのエンドポイントです。
     """
+    print(f"/")
     return {"message": "Sequential Thinking MCP Server is running", "status": "healthy"}
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
@@ -150,6 +152,7 @@ async def health_check():
     サーバーの健康状態を確認します。
     ロードバランサーやモニタリングシステムで使用されます。
     """
+    print(f"/health")
     return {"status": "healthy", "server": "Sequential Thinking MCP Server"}
 
 # MCPツールとして公開されるエンドポイント
@@ -159,47 +162,76 @@ async def sequentialthinking(request: SequentialThinkingRequest):
     Sequential thinking tool for step-by-step reasoning.
     
     このツールは複雑な問題を段階的に分析・解決するための思考プロセスをサポートします。
-    内部的にsequentialthinkingサービスを呼び出します。
+    内部的にHTTPトランスポートでsequentialthinkingサービスを呼び出します。
     """
     service_url = INTERNAL_SERVICES["sequentialthinking"]
+    print(f"[DEBUG] /sequentialthinking called")
+    print(f"[DEBUG] Service URL: {service_url}")
+    print(f"[DEBUG] Request: {request}")
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
+            # HTTPトランスポートでMCPリクエストを送信
+            mcp_request = {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "sequentialthinking",
+                    "arguments": {
+                        "thought": request.thought,
+                        "thoughtNumber": request.thought_number,
+                        "totalThoughts": request.total_thoughts,
+                        "nextThoughtNeeded": request.next_thought_needed,
+                        "isRevision": request.is_revision,
+                        "revisesThought": request.revises_thought,
+                        "branchFromThought": request.branch_from_thought,
+                        "branchId": request.branch_id,
+                        "needsMoreThoughts": request.needs_more_thoughts
+                    }
+                },
+                "id": 1
+            }
+            
+            print(f"[DEBUG] Sending MCP request: {json.dumps(mcp_request, indent=2)}")
+            
             response = await client.post(
-                f"{service_url}/mcp",
-                json={
-                    "method": "tools/call",
-                    "params": {
-                        "name": "sequentialthinking",
-                        "arguments": request.model_dump()
-                    },
-                    "id": "1"
-                }
+                f"{service_url}/api/tools/sequentialthinking",
+                json=mcp_request["params"]["arguments"],
+                headers={"Content-Type": "application/json"}
             )
             response.raise_for_status()
             
-            # MCPレスポンスから結果を抽出
-            mcp_response = response.json()
-            if "result" in mcp_response and "content" in mcp_response["result"]:
-                content = mcp_response["result"]["content"]
+            print(f"[DEBUG] Response status: {response.status_code}")
+            print(f"[DEBUG] Response body: {response.text[:500]}")
+            
+            # レスポンスから結果を抽出
+            api_response = response.json()
+            
+            # SequentialThinkingサービスのレスポンス形式: { content: [{ type: "text", text: "..." }] }
+            if "content" in api_response:
+                content = api_response["content"]
                 if content and len(content) > 0:
+                    print(f"[DEBUG] Content: {content}")
                     result_text = content[0].get("text", "")
                     return {"result": result_text}
             
             # フォールバック: レスポンス全体を返す
-            return {"result": str(mcp_response)}
+            return {"result": json.dumps(api_response, indent=2)}
             
     except httpx.RequestError as e:
+        print(f"[ERROR] Request error: {str(e)}")
         raise HTTPException(
             status_code=503,
             detail=f"Failed to connect to sequentialthinking service: {str(e)}"
         )
     except httpx.HTTPStatusError as e:
+        print(f"[ERROR] HTTP error: {e.response.status_code} - {e.response.text}")
         raise HTTPException(
             status_code=e.response.status_code,
             detail=f"Sequentialthinking service error: {str(e)}"
         )
     except Exception as e:
+        print(f"[ERROR] Unexpected error: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal error: {str(e)}"
@@ -212,6 +244,7 @@ async def get_server_info():
     
     サーバーの基本情報を取得します。
     """
+    print(f"/server_info")
     return {
         "name": "Sequential Thinking MCP Server",
         "version": "1.0.0",
@@ -229,6 +262,7 @@ async def debug_dns():
     """
     from src.auth import CF_TEAM_DOMAIN, test_dns_resolution, get_cloudflare_public_keys
     
+    print("[DEBUG] /debug/dns called")
     result = {
         "cf_team_domain": CF_TEAM_DOMAIN,
         "dns_resolution": False,
@@ -248,6 +282,63 @@ async def debug_dns():
             
         except Exception as e:
             result["error"] = str(e)
+    
+    return result
+
+@app.get("/debug/sequentialthinking", tags=["Debug"])
+async def debug_sequentialthinking():
+    """
+    SequentialThinkingサービスへの接続テスト
+    
+    内部サービスへの接続をテストします。
+    """
+    service_url = INTERNAL_SERVICES["sequentialthinking"]
+    
+    result = {
+        "service_url": service_url,
+        "health_check": False,
+        "message_endpoint": False,
+        "error": None
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # ヘルスチェック
+            try:
+                health_response = await client.get(f"{service_url}/health")
+                result["health_check"] = health_response.status_code == 200
+                result["health_response"] = health_response.json() if health_response.status_code == 200 else None
+            except Exception as e:
+                result["health_error"] = str(e)
+            
+            # HTTPエンドポイントテスト（/api/tools）
+            try:
+                tools_response = await client.get(f"{service_url}/api/tools")
+                result["tools_endpoint"] = tools_response.status_code == 200
+                result["tools_response"] = tools_response.json() if tools_response.status_code == 200 else None
+            except Exception as e:
+                result["tools_error"] = str(e)
+            
+            # ツール実行エンドポイントテスト
+            try:
+                test_thought = {
+                    "thought": "Test thought",
+                    "thoughtNumber": 1,
+                    "totalThoughts": 1,
+                    "nextThoughtNeeded": False
+                }
+                exec_response = await client.post(
+                    f"{service_url}/api/tools/sequentialthinking",
+                    json=test_thought,
+                    headers={"Content-Type": "application/json"}
+                )
+                result["exec_endpoint"] = exec_response.status_code == 200
+                result["exec_response_preview"] = exec_response.text[:500] if exec_response.status_code == 200 else None
+            except Exception as e:
+                result["exec_error"] = str(e)
+                
+    except Exception as e:
+        result["error"] = str(e)
     
     return result
 
