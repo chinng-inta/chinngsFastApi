@@ -7,9 +7,46 @@ from pydantic import BaseModel
 from typing import Optional, List
 from fastapi.middleware.cors import CORSMiddleware
 from src.auth import verify_cloudflare_jwt
+from fastapi_mcp import FastApiMCP
+
+# FastAPI アプリケーションを作成
+app = FastAPI(
+    title="Sequential Thinking MCP Server",
+    version="1.0.0",
+    description="""
+    ## Sequential Thinking MCP Server
+
+    このサーバーは段階的思考（Sequential Thinking）をサポートするMCP（Model Context Protocol）サーバーです。
+
+    ### 主な機能
+    - **Sequential Thinking**: 複雑な問題を段階的に分析・解決
+    - **MCP Protocol**: `/mcp`エンドポイントでMCPリクエストを処理
+    - **Cloudflare Access**: JWT認証による安全なアクセス制御
+
+    ### 利用可能なツール
+    - `sequentialthinking`: 段階的思考プロセスの実行
+    - `get_server_info`: サーバー情報の取得
+
+    ### 認証
+    本番環境では Cloudflare Access による JWT 認証が必要です。
+    開発環境では認証をスキップします。
+    """,
+    contact={
+        "name": "Sequential Thinking MCP Server",
+        "url": "https://github.com/your-repo",
+    },
+    license_info={
+        "name": "MIT License",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 
 # FastMCPサーバーを初期化
-mcp = FastMCP("Sequential Thinking MCP Server")
+#mcp = FastMCP("Sequential Thinking MCP Server")
+mcp = FastApiMCP(app)
+mcp.mount_http()
 
 # Sequential Thinkingツールの定義
 @mcp.tool()
@@ -90,40 +127,6 @@ def thinking_guidance() -> str:
     4. Add more thoughts if needed, even at the "end"
     5. Express uncertainty and explore alternatives
     """
-
-# FastAPI アプリケーションを作成
-app = FastAPI(
-    title="Sequential Thinking MCP Server",
-    version="1.0.0",
-    description="""
-    ## Sequential Thinking MCP Server
-
-    このサーバーは段階的思考（Sequential Thinking）をサポートするMCP（Model Context Protocol）サーバーです。
-
-    ### 主な機能
-    - **Sequential Thinking**: 複雑な問題を段階的に分析・解決
-    - **MCP Protocol**: `/mcp`エンドポイントでMCPリクエストを処理
-    - **Cloudflare Access**: JWT認証による安全なアクセス制御
-
-    ### 利用可能なツール
-    - `sequentialthinking`: 段階的思考プロセスの実行
-    - `get_server_info`: サーバー情報の取得
-
-    ### 認証
-    本番環境では Cloudflare Access による JWT 認証が必要です。
-    開発環境では認証をスキップします。
-    """,
-    contact={
-        "name": "Sequential Thinking MCP Server",
-        "url": "https://github.com/your-repo",
-    },
-    license_info={
-        "name": "MIT License",
-        "url": "https://opensource.org/licenses/MIT",
-    },
-    docs_url="/docs",
-    redoc_url="/redoc"
-)
 
 # Pydanticモデル定義
 class MCPRequest(BaseModel):

@@ -5,3 +5,4 @@ pyjwt
 cryptography
 httpx
 python-dotenv
+fastapi_mcp
