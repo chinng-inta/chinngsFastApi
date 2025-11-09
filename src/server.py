@@ -184,32 +184,20 @@ async def list_tools():
             service_url = service_config["url"]
             
             try:
-                # MCPプロトコルでtools/listリクエストを送信
-                mcp_request = {
-                    "jsonrpc": "2.0",
-                    "method": service_config["method"],
-                    "params": {},
-                    "id": 1
-                }
+                print(f"[DEBUG] Sending GET request to {service_name} at {service_url}/api/tools")
                 
-                print(f"[DEBUG] Sending MCP request to {service_name} at {service_url}")
-                print(f"[DEBUG] Request: {json.dumps(mcp_request, indent=2)}")
-                
-                response = await client.get(
-                    f"{service_url}/api/tools/",
-                    json=mcp_request,
-                    headers={"Content-Type": "application/json"}
-                )
+                response = await client.get(f"{service_url}/api/tools")
                 response.raise_for_status()
                 
                 print(f"[DEBUG] Response status: {response.status_code}")
                 print(f"[DEBUG] Response body: {response.text[:1000]}")
                 
-                mcp_response = response.json()
+                # レスポンスをパース
+                response_data = response.json()
                 
-                # MCPレスポンスから結果を抽出
-                if "result" in mcp_response and "tools" in mcp_response["result"]:
-                    tools = mcp_response["result"]["tools"]
+                # レスポンス形式: { tools: [...] }
+                if "tools" in response_data:
+                    tools = response_data["tools"]
                     all_tools.extend(tools)
                     print(f"[DEBUG] Added {len(tools)} tools from {service_name}")
                 else:
