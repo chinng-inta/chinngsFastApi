@@ -126,7 +126,7 @@ async def authenticate_middleware(request: Request, call_next):
             status_code=403,
             detail="Authentication failed"
         )
-    
+    print(f"[DEBUG] Request: {request}")
     response = await call_next(request)
     return response
 
