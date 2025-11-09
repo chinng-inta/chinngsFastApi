@@ -195,7 +195,7 @@ async def list_tools():
                 print(f"[DEBUG] Sending MCP request to {service_name} at {service_url}")
                 print(f"[DEBUG] Request: {json.dumps(mcp_request, indent=2)}")
                 
-                response = await client.post(
+                response = await client.get(
                     f"{service_url}/api/tools/",
                     json=mcp_request,
                     headers={"Content-Type": "application/json"}
