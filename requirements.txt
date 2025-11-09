@@ -1,7 +1,5 @@
 fastapi==0.121.0
 fastapi_mcp
 uvicorn[standard]
-pyjwt
-cryptography
 httpx
 python-dotenv

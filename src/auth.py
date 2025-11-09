@@ -1,142 +1,106 @@
-import jwt
-import httpx
-from typing import Optional
-from fastapi import Request, HTTPException
-from functools import wraps
 import os
-import socket
+import httpx
+from fastapi import HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-CF_TEAM_DOMAIN = os.getenv("CF_TEAM_DOMAIN")
-CF_AUD_TAG = os.getenv("CF_AUD_TAG")
+# Workers MCP ServerのURL
+WORKERS_MCP_URL = os.getenv("WORKERS_MCP_URL")
 
-# Cloudflareの公開鍵キャッシュ
-_cf_public_keys = None
+# HTTPBearerスキーム
+security = HTTPBearer()
 
-async def test_dns_resolution(domain: str) -> bool:
-    """DNS解決をテスト"""
-    try:
-        # ドメインからホスト名を抽出
-        hostname = domain.replace("https://", "").replace("http://", "")
-        socket.gethostbyname(hostname)
-        print(f"DNS解決成功: {hostname}")
-        return True
-    except socket.gaierror as e:
-        print(f"DNS解決失敗: {hostname} - {e}")
-        return False
-
-async def get_cloudflare_public_keys():
-    """Cloudflare Accessの公開鍵を取得（キャッシュ付き）"""
-    global _cf_public_keys
+async def verify_workers_jwt(token: str) -> dict:
+    """
+    Workers MCP Serverが発行したJWTを検証する
     
-    if not CF_TEAM_DOMAIN:
-        print("警告: CF_TEAM_DOMAIN環境変数が設定されていません")
-        return {"keys": []}
+    Args:
+        token: Bearer トークン（"Bearer "プレフィックスなし）
     
-    if _cf_public_keys is None:
-        certs_url = f"https://{CF_TEAM_DOMAIN}/cdn-cgi/access/certs"
-        
-        # DNS解決をテスト
-        dns_ok = await test_dns_resolution(CF_TEAM_DOMAIN)
-        if not dns_ok:
-            print(f"警告: {CF_TEAM_DOMAIN}のDNS解決に失敗しました")
-            return {"keys": []}  # 空のキーを返して処理を継続
-        
-        try:
-            print(f"証明書取得を試行: {certs_url}")
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(certs_url)
-                response.raise_for_status()
-                _cf_public_keys = response.json()
-                print(f"証明書取得成功: {len(_cf_public_keys.get('keys', []))}個のキー")
-        except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            print(f"Cloudflare証明書取得エラー: {e}")
-            print(f"URL: {certs_url}")
-            # エラーの場合も空のキーを返して処理を継続
-            _cf_public_keys = {"keys": []}
+    Returns:
+        dict: 検証結果 {"valid": True, "userId": "...", "email": "..."}
     
-    return _cf_public_keys
-
-async def verify_cloudflare_jwt(jwt_token: str) -> bool:
-    """Cloudflare Access JWTを検証"""
-    # 環境変数が設定されていない場合はスキップ
-    if not CF_TEAM_DOMAIN or not CF_AUD_TAG:
-        print("警告: CF_TEAM_DOMAIN または CF_AUD_TAG が設定されていません。認証をスキップします。")
-        return False
+    Raises:
+        HTTPException: JWT検証失敗時
+    """
+    if not WORKERS_MCP_URL:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="WORKERS_MCP_URL environment variable is not set"
+        )
+    
+    verify_url = f"{WORKERS_MCP_URL}/verify-jwt"
     
     try:
-        print(f"JWT検証開始 - Domain: {CF_TEAM_DOMAIN}, AUD: {CF_AUD_TAG}")
-        certs = await get_cloudflare_public_keys()
-        
-        if not certs.get('keys'):
-            print("警告: 証明書キーが取得できませんでした。認証をスキップします。")
-            return False
-        
-        for cert_dict in certs.get('keys', []):
-            try:
-                # JWTデコード＆検証
-                decoded = jwt.decode(
-                    jwt_token,
-                    key=jwt.algorithms.RSAAlgorithm.from_jwk(cert_dict),
-                    algorithms=['RS256'],
-                    audience=CF_AUD_TAG,
-                    options={
-                        "verify_signature": True,
-                        "verify_exp": True,
-                        "verify_aud": True
-                    }
+        print(f"[AUTH] JWT検証開始: {verify_url}")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                verify_url,
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("valid"):
+                    print(f"[AUTH] JWT検証成功: userId={result.get('userId')}, email={result.get('email')}")
+                    return result
+                else:
+                    error_msg = result.get('error', 'Unknown error')
+                    print(f"[AUTH] JWT無効: {error_msg}")
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Invalid JWT: {error_msg}"
+                    )
+            elif response.status_code == 401:
+                print(f"[AUTH] 認証ヘッダーが無効または欠落")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Authorization header missing or invalid"
                 )
-                
-                # issuerの検証
-                expected_iss = f"https://{CF_TEAM_DOMAIN}"
-                if decoded.get('iss') != expected_iss:
-                    continue
-                
-                print("JWT検証成功")
-                return True
-                
-            except jwt.InvalidTokenError as e:
-                print(f"JWT検証失敗（次のキーを試行）: {e}")
-                continue
-        
-        print("すべてのキーでJWT検証に失敗")
-        return False
-        
-    except Exception as e:
-        print(f"JWT検証エラー: {e}")
-        return False
-
-def require_cloudflare_auth(func):
-    """Cloudflare認証が必要なエンドポイントのデコレーター"""
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        # Requestオブジェクトを取得
-        request = None
-        for arg in args:
-            if isinstance(arg, Request):
-                request = arg
-                break
-        
-        if not request:
-            raise HTTPException(status_code=500, detail="Request object not found")
-        
-        # JWT取得
-        jwt_token = request.headers.get("CF-Access-Jwt-Assertion")
-        
-        if not jwt_token:
-            raise HTTPException(
-                status_code=401, 
-                detail="CF-Access-Jwt-Assertion header required"
-            )
-        
-        # JWT検証
-        is_valid = await verify_cloudflare_jwt(jwt_token)
-        
-        if not is_valid:
-            raise HTTPException(
-                status_code=403, 
-                detail="Invalid Cloudflare Access token"
-            )
-        
-        return await func(*args, **kwargs)
+            elif response.status_code == 403:
+                print(f"[AUTH] JWT検証失敗")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="JWT verification failed"
+                )
+            else:
+                print(f"[AUTH] JWT検証サービスエラー: status={response.status_code}")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"JWT verification service returned status {response.status_code}"
+                )
     
-    return wrapper
+    except httpx.TimeoutException:
+        print(f"[AUTH] JWT検証タイムアウト")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="JWT verification service timeout"
+        )
+    except httpx.RequestError as e:
+        print(f"[AUTH] JWT検証サービス接続失敗: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to JWT verification service: {str(e)}"
+        )
+
+async def authenticate_workers_jwt(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+) -> dict:
+    """
+    FastAPIの依存性注入で使用する認証関数
+    
+    Args:
+        credentials: HTTPBearerスキームから抽出された認証情報
+    
+    Returns:
+        dict: ユーザー情報 {"userId": "...", "email": "..."}
+    
+    Raises:
+        HTTPException: 認証失敗時
+    """
+    token = credentials.credentials
+    result = await verify_workers_jwt(token)
+    
+    return {
+        "userId": result.get("userId"),
+        "email": result.get("email")
+    }

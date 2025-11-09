@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from src.auth import verify_cloudflare_jwt
+from src.auth import authenticate_workers_jwt
 from fastapi_mcp import FastApiMCP
 
 INTERNAL_SERVICES = {
@@ -77,13 +77,7 @@ class RootResponse(BaseModel):
     message: str
     status: str
 
-class DNSDebugResponse(BaseModel):
-    """DNS デバッグレスポンス"""
-    cf_team_domain: Optional[str] = None
-    dns_resolution: bool
-    cert_fetch: bool
-    key_count: int = 0
-    error: Optional[str] = None
+
 
 # CORS設定
 app.add_middleware(
@@ -97,39 +91,41 @@ app.add_middleware(
 
 # 認証ミドルウェア
 @app.middleware("http")
-async def authenticate_cloudflare(request: Request, call_next):
-    """全リクエストでCloudflare JWT認証"""
+async def authenticate_middleware(request: Request, call_next):
+    """全リクエストでWorkers JWT認証"""
     
     # ヘルスチェックとドキュメントのみ除外（MCPエンドポイントは認証対象）
-    if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json", "/debug/dns"]:
+    if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json"]:
         return await call_next(request)
     
-    # 開発環境では認証をスキップ
-    #if os.getenv("RAILWAY_ENVIRONMENT") != "production":
+    # 開発環境では認証をスキップ（オプション）
+    #if os.getenv("SKIP_AUTH") == "true":
+    #    print("[AUTH] 認証スキップ（SKIP_AUTH=true）")
     #    return await call_next(request)
     
-    # JWT取得
-    jwt_token = request.headers.get("CF-Access-Jwt-Assertion")
+    # Authorization ヘッダーから JWT を取得
+    auth_header = request.headers.get("Authorization")
     
-    if not jwt_token:
+    if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(
             status_code=401,
-            detail="CF-Access-Jwt-Assertion header required"
+            detail="Authorization header with Bearer token required"
         )
     
-    # JWT検証
+    # JWT検証（verify_workers_jwt を直接呼び出し）
+    from src.auth import verify_workers_jwt
+    
+    token = auth_header.replace("Bearer ", "")
     try:
-        is_valid = await verify_cloudflare_jwt(jwt_token)
-        
-        if not is_valid:
-            raise HTTPException(
-                status_code=403,
-                detail="Invalid Cloudflare Access token"
-            )
+        await verify_workers_jwt(token)
+    except HTTPException:
+        raise
     except Exception as e:
-        # DNS解決エラーなどの場合は警告ログを出して通す
-        print(f"認証エラー（開発環境のため通します）: {e}")
-        pass
+        print(f"[AUTH] 認証エラー: {e}")
+        raise HTTPException(
+            status_code=403,
+            detail="Authentication failed"
+        )
     
     response = await call_next(request)
     return response
@@ -252,36 +248,36 @@ async def get_server_info():
         "tools": ["sequentialthinking", "get_server_info"]
     }
 
-@app.get("/debug/dns", response_model=DNSDebugResponse, tags=["Debug"])
-async def debug_dns():
+@app.get("/debug/auth", tags=["Debug"])
+async def debug_auth():
     """
-    DNS解決とCloudflare接続テスト
+    Workers JWT認証の接続テスト
     
-    Cloudflare Access の DNS 解決と証明書取得をテストします。
+    Workers MCP Server の JWT 検証エンドポイントへの接続をテストします。
     認証の問題をデバッグする際に使用してください。
     """
-    from src.auth import CF_TEAM_DOMAIN, test_dns_resolution, get_cloudflare_public_keys
+    from src.auth import WORKERS_MCP_URL
     
-    print("[DEBUG] /debug/dns called")
+    print("[DEBUG] /debug/auth called")
     result = {
-        "cf_team_domain": CF_TEAM_DOMAIN,
-        "dns_resolution": False,
-        "cert_fetch": False,
+        "workers_mcp_url": WORKERS_MCP_URL,
+        "connection_test": False,
         "error": None
     }
     
-    if CF_TEAM_DOMAIN:
+    if WORKERS_MCP_URL:
         try:
-            # DNS解決テスト
-            result["dns_resolution"] = await test_dns_resolution(CF_TEAM_DOMAIN)
-            
-            # 証明書取得テスト
-            certs = await get_cloudflare_public_keys()
-            result["cert_fetch"] = len(certs.get('keys', [])) > 0
-            result["key_count"] = len(certs.get('keys', []))
-            
+            verify_url = f"{WORKERS_MCP_URL}/verify-jwt"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # 認証なしでアクセスして401が返ることを確認
+                response = await client.get(verify_url)
+                result["connection_test"] = response.status_code == 401
+                result["status_code"] = response.status_code
+                result["response"] = response.text[:200]
         except Exception as e:
             result["error"] = str(e)
+    else:
+        result["error"] = "WORKERS_MCP_URL not set"
     
     return result
 
