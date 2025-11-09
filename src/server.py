@@ -11,7 +11,10 @@ from src.auth import authenticate_workers_jwt
 from fastapi_mcp import FastApiMCP
 
 INTERNAL_SERVICES = {
-    "sequentialthinking": os.getenv("SEQUENTIALTHINKING_SERVICE_URL", "http://sequentialthinking.railway.internal:8080")
+    "sequentialthinking": {
+        "url": os.getenv("SEQUENTIALTHINKING_SERVICE_URL", "http://sequentialthinking.railway.internal:8080"),
+        "method": "tools/list"
+    }
 }
 
 # FastAPI アプリケーションを作成
@@ -77,6 +80,16 @@ class RootResponse(BaseModel):
     """ルートエンドポイントレスポンス"""
     message: str
     status: str
+
+class ToolInfo(BaseModel):
+    """ツール情報"""
+    name: str
+    description: Optional[str] = None
+    inputSchema: dict
+
+class ListToolsResponse(BaseModel):
+    """ツールリストレスポンス"""
+    tools: List[ToolInfo]
 
 @app.exception_handler(RequestValidationError)
 async def handler(request:Request, exc:RequestValidationError):
@@ -155,6 +168,69 @@ async def health_check():
     print(f"/health")
     return {"status": "healthy", "server": "Sequential Thinking MCP Server"}
 
+@app.get("/list", response_model=ListToolsResponse, tags=["MCP Tools"])
+async def list_tools():
+    """
+    利用可能なMCPツールのリストを取得
+    
+    全てのMCPサーバーで使用可能なツールとその引数の情報を取得します。
+    """
+    print(f"[DEBUG] /list called")
+    
+    all_tools = []
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for service_name, service_config in INTERNAL_SERVICES.items():
+            service_url = service_config["url"]
+            
+            try:
+                # MCPプロトコルでtools/listリクエストを送信
+                mcp_request = {
+                    "jsonrpc": "2.0",
+                    "method": service_config["method"],
+                    "params": {},
+                    "id": 1
+                }
+                
+                print(f"[DEBUG] Sending MCP request to {service_name} at {service_url}")
+                print(f"[DEBUG] Request: {json.dumps(mcp_request, indent=2)}")
+                
+                response = await client.post(
+                    f"{service_url}/message",
+                    json=mcp_request,
+                    headers={"Content-Type": "application/json"}
+                )
+                response.raise_for_status()
+                
+                print(f"[DEBUG] Response status: {response.status_code}")
+                print(f"[DEBUG] Response body: {response.text[:1000]}")
+                
+                mcp_response = response.json()
+                
+                # MCPレスポンスから結果を抽出
+                if "result" in mcp_response and "tools" in mcp_response["result"]:
+                    tools = mcp_response["result"]["tools"]
+                    all_tools.extend(tools)
+                    print(f"[DEBUG] Added {len(tools)} tools from {service_name}")
+                else:
+                    print(f"[WARNING] Invalid response format from {service_name}")
+                    
+            except httpx.RequestError as e:
+                print(f"[ERROR] Request error for {service_name}: {str(e)}")
+                # 他のサービスの取得を続行
+                continue
+            except httpx.HTTPStatusError as e:
+                print(f"[ERROR] HTTP error for {service_name}: {e.response.status_code} - {e.response.text}")
+                # 他のサービスの取得を続行
+                continue
+            except Exception as e:
+                print(f"[ERROR] Unexpected error for {service_name}: {str(e)}")
+                # 他のサービスの取得を続行
+                continue
+    
+    print(f"[DEBUG] Total tools collected: {len(all_tools)}")
+    return {"tools": all_tools}
+
 # MCPツールとして公開されるエンドポイント
 @app.post("/sequentialthinking", response_model=SequentialThinkingResponse, tags=["MCP Tools"])
 async def sequentialthinking(request: SequentialThinkingRequest):
@@ -164,7 +240,8 @@ async def sequentialthinking(request: SequentialThinkingRequest):
     このツールは複雑な問題を段階的に分析・解決するための思考プロセスをサポートします。
     内部的にHTTPトランスポートでsequentialthinkingサービスを呼び出します。
     """
-    service_url = INTERNAL_SERVICES["sequentialthinking"]
+    service_config = INTERNAL_SERVICES["sequentialthinking"]
+    service_url = service_config["url"]
     print(f"[DEBUG] /sequentialthinking called")
     print(f"[DEBUG] Service URL: {service_url}")
     print(f"[DEBUG] Request: {request}")
@@ -292,7 +369,8 @@ async def debug_sequentialthinking():
     
     内部サービスへの接続をテストします。
     """
-    service_url = INTERNAL_SERVICES["sequentialthinking"]
+    service_config = INTERNAL_SERVICES["sequentialthinking"]
+    service_url = service_config["url"]
     
     result = {
         "service_url": service_url,
