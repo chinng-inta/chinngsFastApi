@@ -77,7 +77,10 @@ class RootResponse(BaseModel):
     message: str
     status: str
 
-
+@app.exception_handler(RequestValidationError)
+async def handler(request:Request, exc:RequestValidationError):
+    print(exc)
+    return JSONResponse(content={}, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
 # CORS設定
 app.add_middleware(
