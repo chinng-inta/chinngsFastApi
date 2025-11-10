@@ -231,6 +231,7 @@ async def list_tools():
                 continue
     
     print(f"[DEBUG] Total tools collected: {len(all_tools)}")
+    print(f"[DEBUG] all tools: {all_tools}")
     return {"tools": all_tools}
 
 # MCPツールとして公開されるエンドポイント
