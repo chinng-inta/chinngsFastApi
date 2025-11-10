@@ -14,6 +14,10 @@ INTERNAL_SERVICES = {
     "sequentialthinking": {
         "url": os.getenv("SEQUENTIALTHINKING_SERVICE_URL", "http://sequentialthinking.railway.internal:8080"),
         "method": "tools/list"
+    },
+    "server-memory": {
+        "url": os.getenv("SERVER_MEMORY_SERVICE_URL", "http://server-memory.railway.internal:8080"),
+        "method": "tools/list"
     }
 }
 
@@ -62,6 +66,16 @@ class SequentialThinkingRequest(BaseModel):
 
 class SequentialThinkingResponse(BaseModel):
     """Sequential Thinking レスポンス"""
+    result: str
+
+class ServermemoryRequest(BaseModel):
+    """server-memory リクエスト"""
+    operation: str
+    key: Optional[str] = None
+    value: Optional[str] = None
+
+class ServermemoryResponse(BaseModel):
+    """server-memory レスポンス"""
     result: str
 
 class ServerInfoResponse(BaseModel):
@@ -302,6 +316,82 @@ async def sequentialthinking(request: SequentialThinkingRequest):
             detail=f"Internal error: {str(e)}"
         )
 
+# MCPツールとして公開されるエンドポイント
+@app.post("/server-memory", response_model=ServermemoryResponse, tags=["MCP Tools"])
+async def server_memory_tool(request: ServermemoryRequest):
+    """
+    Server Memory MCP Server - Knowledge Graph operations
+    
+    内部的にHTTPトランスポートでserver-memoryサービスを呼び出します。
+    """
+    service_config = INTERNAL_SERVICES["server-memory"]
+    service_url = service_config["url"]
+    print(f"[DEBUG] /server-memory called")
+    print(f"[DEBUG] Service URL: {service_url}")
+    print(f"[DEBUG] Request: {request}")
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # HTTPトランスポートでMCPリクエストを送信
+            mcp_request = {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "server-memory",
+                    "arguments": {
+                        "operation": request.operation,
+                        "key": request.key,
+                        "value": request.value
+                    }
+                },
+                "id": 1
+            }
+            
+            print(f"[DEBUG] Sending MCP request: {json.dumps(mcp_request, indent=2)}")
+            
+            response = await client.post(
+                f"{service_url}/api/tools/server-memory",
+                json=mcp_request["params"]["arguments"],
+                headers={"Content-Type": "application/json"}
+            )
+            response.raise_for_status()
+            
+            print(f"[DEBUG] Response status: {response.status_code}")
+            print(f"[DEBUG] Response body: {response.text[:500]}")
+            
+            # レスポンスから結果を抽出
+            api_response = response.json()
+            
+            # server-memoryサービスのレスポンス形式: { content: [{ type: "text", text: "..." }] }
+            if "content" in api_response:
+                content = api_response["content"]
+                if content and len(content) > 0:
+                    print(f"[DEBUG] Content: {content}")
+                    result_text = content[0].get("text", "")
+                    return {"result": result_text}
+            
+            # フォールバック: レスポンス全体を返す
+            return {"result": json.dumps(api_response, indent=2)}
+            
+    except httpx.RequestError as e:
+        print(f"[ERROR] Request error: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to connect to server-memory service: {str(e)}"
+        )
+    except httpx.HTTPStatusError as e:
+        print(f"[ERROR] HTTP error: {e.response.status_code} - {e.response.text}")
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"server-memory service error: {str(e)}"
+        )
+    except Exception as e:
+        print(f"[ERROR] Unexpected error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal error: {str(e)}"
+        )
+
 @app.get("/server_info", response_model=ServerInfoResponse, tags=["MCP Tools"])
 async def get_server_info():
     """
@@ -314,7 +404,7 @@ async def get_server_info():
         "name": "Sequential Thinking MCP Server",
         "version": "1.0.0",
         "environment": os.getenv("RAILWAY_ENVIRONMENT", "development"),
-        "tools": ["sequentialthinking", "get_server_info"]
+        "tools": ["sequentialthinking", "server-memory", "get_server_info"]
     }
 
 @app.get("/debug/auth", tags=["Debug"])
@@ -396,6 +486,63 @@ async def debug_sequentialthinking():
                 exec_response = await client.post(
                     f"{service_url}/api/tools/sequentialthinking",
                     json=test_thought,
+                    headers={"Content-Type": "application/json"}
+                )
+                result["exec_endpoint"] = exec_response.status_code == 200
+                result["exec_response_preview"] = exec_response.text[:500] if exec_response.status_code == 200 else None
+            except Exception as e:
+                result["exec_error"] = str(e)
+                
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+@app.get("/debug/server-memory", tags=["Debug"])
+async def debug_server_memory():
+    """
+    Server-Memoryサービスへの接続テスト
+    
+    内部サービスへの接続をテストします。
+    """
+    service_config = INTERNAL_SERVICES["server-memory"]
+    service_url = service_config["url"]
+    
+    result = {
+        "service_url": service_url,
+        "health_check": False,
+        "tools_endpoint": False,
+        "error": None
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # ヘルスチェック
+            try:
+                health_response = await client.get(f"{service_url}/health")
+                result["health_check"] = health_response.status_code == 200
+                result["health_response"] = health_response.json() if health_response.status_code == 200 else None
+            except Exception as e:
+                result["health_error"] = str(e)
+            
+            # HTTPエンドポイントテスト（/api/tools）
+            try:
+                tools_response = await client.get(f"{service_url}/api/tools")
+                result["tools_endpoint"] = tools_response.status_code == 200
+                result["tools_response"] = tools_response.json() if tools_response.status_code == 200 else None
+            except Exception as e:
+                result["tools_error"] = str(e)
+            
+            # ツール実行エンドポイントテスト
+            try:
+                test_request = {
+                    "operation": "list",
+                    "key": None,
+                    "value": None
+                }
+                exec_response = await client.post(
+                    f"{service_url}/api/tools/server-memory",
+                    json=test_request,
                     headers={"Content-Type": "application/json"}
                 )
                 result["exec_endpoint"] = exec_response.status_code == 200
