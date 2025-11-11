@@ -259,14 +259,14 @@ async def sequentialthinking(request: SequentialThinkingRequest):
                     "name": "sequentialthinking",
                     "arguments": {
                         "thought": request.thought,
-                        "thoughtNumber": request.thought_number,
-                        "totalThoughts": request.total_thoughts,
-                        "nextThoughtNeeded": request.next_thought_needed,
-                        "isRevision": request.is_revision,
-                        "revisesThought": request.revises_thought,
-                        "branchFromThought": request.branch_from_thought,
-                        "branchId": request.branch_id,
-                        "needsMoreThoughts": request.needs_more_thoughts
+                        "thoughtNumber": request.thoughtNumber,
+                        "totalThoughts": request.totalThoughts,
+                        "nextThoughtNeeded": request.nextThoughtNeeded,
+                        "isRevision": request.isRevision,
+                        "revisesThought": request.revisesThought,
+                        "branchFromThought": request.branchFromThought,
+                        "branchId": request.branchId,
+                        "needsMoreThoughts": request.needsMoreThoughts
                     }
                 },
                 "id": 1
