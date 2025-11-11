@@ -212,7 +212,9 @@ async def list_tools():
                 # レスポンス形式: { tools: [...] }
                 if "tools" in response_data:
                     tools = response_data["tools"]
-                    all_tools.extend(tools)
+                    #all_tools.extend(tools)
+                    service[" service_name"] = tools
+                    all_tools.extend(service)
                     print(f"[DEBUG] Added {len(tools)} tools from {service_name}")
                 else:
                     print(f"[WARNING] Invalid response format from {service_name}")
