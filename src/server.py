@@ -213,7 +213,7 @@ async def list_tools():
                 if "tools" in response_data:
                     tools = response_data["tools"]
                     #all_tools.extend(tools)
-                    service[" service_name"] = tools
+                    service[service_name] = tools
                     all_tools.extend(service)
                     print(f"[DEBUG] Added {len(tools)} tools from {service_name}")
                 else:
