@@ -55,14 +55,14 @@ app = FastAPI(
 class SequentialThinkingRequest(BaseModel):
     """Sequential Thinking リクエスト"""
     thought: str
-    thought_number: int
-    total_thoughts: int
-    next_thought_needed: bool
-    is_revision: bool = False
-    revises_thought: Optional[int] = None
-    branch_from_thought: Optional[int] = None
-    branch_id: Optional[str] = None
-    needs_more_thoughts: bool = False
+    thoughtNumber: int
+    totalThoughts: int
+    nextThoughtNeeded: bool
+    isRevision: Optional[bool] = False
+    revisesThought: Optional[int] = None
+    branchFromThought: Optional[int] = None
+    branchId: Optional[str] = None
+    needsMoreThoughts: bool = False
 
 class SequentialThinkingResponse(BaseModel):
     """Sequential Thinking レスポンス"""
