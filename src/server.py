@@ -103,7 +103,7 @@ class ToolInfo(BaseModel):
 
 class ListToolsResponse(BaseModel):
     """ツールリストレスポンス"""
-    tools: List[ToolInfo]
+    tools: List[dict]
 
 @app.exception_handler(RequestValidationError)
 async def handler(request:Request, exc:RequestValidationError):
