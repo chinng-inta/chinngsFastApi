@@ -69,10 +69,9 @@ class SequentialThinkingResponse(BaseModel):
     result: str
 
 class ServermemoryRequest(BaseModel):
-    """server-memory リクエスト"""
-    operation: str
-    key: Optional[str] = None
-    value: Optional[str] = None
+    """server-memory リクエスト - 柔軟な構造"""
+    class Config:
+        extra = "allow"  # 追加フィールドを許可
 
 class ServermemoryResponse(BaseModel):
     """server-memory レスポンス"""
@@ -334,17 +333,16 @@ async def server_memory_tool(request: ServermemoryRequest):
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
+            # リクエストボディを辞書に変換
+            request_data = request.model_dump(exclude_unset=True)
+            
             # HTTPトランスポートでMCPリクエストを送信
             mcp_request = {
                 "jsonrpc": "2.0",
                 "method": "tools/call",
                 "params": {
                     "name": "server-memory",
-                    "arguments": {
-                        "operation": request.operation,
-                        "key": request.key,
-                        "value": request.value
-                    }
+                    "arguments": request_data
                 },
                 "id": 1
             }
@@ -353,7 +351,7 @@ async def server_memory_tool(request: ServermemoryRequest):
             
             response = await client.post(
                 f"{service_url}/api/tools/server-memory",
-                json=mcp_request["params"]["arguments"],
+                json=request_data,
                 headers={"Content-Type": "application/json"}
             )
             response.raise_for_status()
