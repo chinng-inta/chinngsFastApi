@@ -70,8 +70,11 @@ class SequentialThinkingResponse(BaseModel):
 
 class ServermemoryRequest(BaseModel):
     """server-memory リクエスト - 柔軟な構造"""
-    tool: str  # ツール名（例: search_nodes, open_nodes, create_entities等）
-    params: dict  # ツールのパラメータ
+    tool: Optional[str] = None  # ツール名（例: search_nodes, open_nodes, create_entities等）
+    params: Optional[dict] = None  # ツールのパラメータ
+    
+    class Config:
+        extra = "allow"  # 追加フィールドを許可
 
 class ServermemoryResponse(BaseModel):
     """server-memory レスポンス"""
@@ -333,10 +336,15 @@ async def server_memory_tool(request: ServermemoryRequest):
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # HTTPトランスポートでMCPリクエストを送信
-            # server-memoryサービスの特定のツールエンドポイントを呼び出す
-            tool_name = request.tool
-            tool_params = request.params
+            # リクエスト形式を判定
+            if request.tool and request.params:
+                # 形式1: {"tool": "search_nodes", "params": {"query": "test"}}
+                tool_name = request.tool
+                tool_params = request.params
+            else:
+                # 形式2: {"query": "test"} - デフォルトでsearch_nodesを使用
+                tool_name = "search_nodes"
+                tool_params = request.model_dump(exclude={"tool", "params"}, exclude_unset=True)
             
             print(f"[DEBUG] Tool name: {tool_name}")
             print(f"[DEBUG] Tool params: {json.dumps(tool_params, indent=2)}")
