@@ -70,11 +70,10 @@ class SequentialThinkingResponse(BaseModel):
 
 class ServermemoryRequest(BaseModel):
     """server-memory リクエスト - 柔軟な構造"""
-    tool: Optional[str] = None  # ツール名（例: search_nodes, open_nodes, create_entities等）
-    params: Optional[dict] = None  # ツールのパラメータ
+    operation: str  # 操作名（例: search_nodes, open_nodes, create_entities等）
     
     class Config:
-        extra = "allow"  # 追加フィールドを許可
+        extra = "allow"  # 追加フィールドを許可（各操作固有のパラメータ用）
 
 class ServermemoryResponse(BaseModel):
     """server-memory レスポンス"""
@@ -339,11 +338,18 @@ async def server_memory_tool(request: ServermemoryRequest):
             # リクエストをそのまま辞書に変換
             request_data = request.model_dump(exclude_unset=True)
             
-            print(f"[DEBUG] Request data: {json.dumps(request_data, indent=2)}")
+            # server-memoryが期待する形式に変換
+            # 形式: {"method": "tools/call", "arguments": {"operation": "...", ...}}
+            mcp_request = {
+                "method": "tools/call",
+                "arguments": request_data
+            }
+            
+            print(f"[DEBUG] Sending MCP request: {json.dumps(mcp_request, indent=2)}")
             
             response = await client.post(
                 f"{service_url}/api/tools/server-memory",
-                json=request_data,
+                json=mcp_request,
                 headers={"Content-Type": "application/json"}
             )
             response.raise_for_status()
