@@ -70,8 +70,8 @@ class SequentialThinkingResponse(BaseModel):
 
 class ServermemoryRequest(BaseModel):
     """server-memory リクエスト - 柔軟な構造"""
-    class Config:
-        extra = "allow"  # 追加フィールドを許可
+    tool: str  # ツール名（例: search_nodes, open_nodes, create_entities等）
+    params: dict  # ツールのパラメータ
 
 class ServermemoryResponse(BaseModel):
     """server-memory レスポンス"""
@@ -333,25 +333,17 @@ async def server_memory_tool(request: ServermemoryRequest):
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # リクエストボディを辞書に変換
-            request_data = request.model_dump(exclude_unset=True)
-            
             # HTTPトランスポートでMCPリクエストを送信
-            mcp_request = {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "server-memory",
-                    "arguments": request_data
-                },
-                "id": 1
-            }
+            # server-memoryサービスの特定のツールエンドポイントを呼び出す
+            tool_name = request.tool
+            tool_params = request.params
             
-            print(f"[DEBUG] Sending MCP request: {json.dumps(mcp_request, indent=2)}")
+            print(f"[DEBUG] Tool name: {tool_name}")
+            print(f"[DEBUG] Tool params: {json.dumps(tool_params, indent=2)}")
             
             response = await client.post(
-                f"{service_url}/api/tools/server-memory",
-                json=request_data,
+                f"{service_url}/api/tools/{tool_name}",
+                json=tool_params,
                 headers={"Content-Type": "application/json"}
             )
             response.raise_for_status()
