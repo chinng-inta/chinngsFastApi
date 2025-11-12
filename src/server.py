@@ -336,22 +336,14 @@ async def server_memory_tool(request: ServermemoryRequest):
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # リクエスト形式を判定
-            if request.tool and request.params:
-                # 形式1: {"tool": "search_nodes", "params": {"query": "test"}}
-                tool_name = request.tool
-                tool_params = request.params
-            else:
-                # 形式2: {"query": "test"} - デフォルトでsearch_nodesを使用
-                tool_name = "search_nodes"
-                tool_params = request.model_dump(exclude={"tool", "params"}, exclude_unset=True)
+            # リクエストをそのまま辞書に変換
+            request_data = request.model_dump(exclude_unset=True)
             
-            print(f"[DEBUG] Tool name: {tool_name}")
-            print(f"[DEBUG] Tool params: {json.dumps(tool_params, indent=2)}")
+            print(f"[DEBUG] Request data: {json.dumps(request_data, indent=2)}")
             
             response = await client.post(
-                f"{service_url}/api/tools/{tool_name}",
-                json=tool_params,
+                f"{service_url}/api/tools/server-memory",
+                json=request_data,
                 headers={"Content-Type": "application/json"}
             )
             response.raise_for_status()
