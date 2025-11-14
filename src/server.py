@@ -158,7 +158,7 @@ async def authenticate_middleware(request: Request, call_next):
             status_code=403,
             detail="Authentication failed"
         )
-    print(f"[DEBUG] Request: {request}")
+    # print(f"[DEBUG] Request: {request}")
     response = await call_next(request)
     return response
 
@@ -205,7 +205,7 @@ async def list_tools():
                 response.raise_for_status()
                 
                 print(f"[DEBUG] Response status: {response.status_code}")
-                print(f"[DEBUG] Response body: {response.text[:1000]}")
+                # print(f"[DEBUG] Response body: {response.text[:1000]}")
                 
                 # レスポンスをパース
                 response_data = response.json()
@@ -233,7 +233,7 @@ async def list_tools():
                 continue
     
     print(f"[DEBUG] Total tools collected: {len(all_tools)}")
-    print(f"[DEBUG] all tools: {all_tools}")
+    # print(f"[DEBUG] all tools: {all_tools}")
     return {"tools": all_tools}
 
 # MCPツールとして公開されるエンドポイント
@@ -248,8 +248,8 @@ async def sequentialthinking(request: SequentialThinkingRequest):
     service_config = INTERNAL_SERVICES["sequentialthinking"]
     service_url = service_config["url"]
     print(f"[DEBUG] /sequentialthinking called")
-    print(f"[DEBUG] Service URL: {service_url}")
-    print(f"[DEBUG] Request: {request}")
+    # print(f"[DEBUG] Service URL: {service_url}")
+    # print(f"[DEBUG] Request: {request}")
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -274,7 +274,7 @@ async def sequentialthinking(request: SequentialThinkingRequest):
                 "id": 1
             }
             
-            print(f"[DEBUG] Sending MCP request: {json.dumps(mcp_request, indent=2)}")
+            #  print(f"[DEBUG] Sending MCP request: {json.dumps(mcp_request, indent=2)}")
             
             response = await client.post(
                 f"{service_url}/api/tools/sequentialthinking",
@@ -284,7 +284,7 @@ async def sequentialthinking(request: SequentialThinkingRequest):
             response.raise_for_status()
             
             print(f"[DEBUG] Response status: {response.status_code}")
-            print(f"[DEBUG] Response body: {response.text[:500]}")
+            # print(f"[DEBUG] Response body: {response.text[:500]}")
             
             # レスポンスから結果を抽出
             api_response = response.json()
@@ -293,7 +293,7 @@ async def sequentialthinking(request: SequentialThinkingRequest):
             if "content" in api_response:
                 content = api_response["content"]
                 if content and len(content) > 0:
-                    print(f"[DEBUG] Content: {content}")
+                    # print(f"[DEBUG] Content: {content}")
                     result_text = content[0].get("text", "")
                     return {"result": result_text}
             
@@ -330,8 +330,8 @@ async def server_memory_tool(request: ServermemoryRequest):
     service_config = INTERNAL_SERVICES["server-memory"]
     service_url = service_config["url"]
     print(f"[DEBUG] /server-memory called")
-    print(f"[DEBUG] Service URL: {service_url}")
-    print(f"[DEBUG] Request: {request}")
+    # print(f"[DEBUG] Service URL: {service_url}")
+    # print(f"[DEBUG] Request: {request}")
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -345,7 +345,7 @@ async def server_memory_tool(request: ServermemoryRequest):
                 "arguments": request_data
             }
             
-            print(f"[DEBUG] Sending MCP request: {json.dumps(mcp_request, indent=2)}")
+            # print(f"[DEBUG] Sending MCP request: {json.dumps(mcp_request, indent=2)}")
             
             response = await client.post(
                 f"{service_url}/api/tools/server-memory",
@@ -355,7 +355,7 @@ async def server_memory_tool(request: ServermemoryRequest):
             response.raise_for_status()
             
             print(f"[DEBUG] Response status: {response.status_code}")
-            print(f"[DEBUG] Response body: {response.text[:500]}")
+            # print(f"[DEBUG] Response body: {response.text[:500]}")
             
             # レスポンスから結果を抽出
             api_response = response.json()
@@ -364,7 +364,7 @@ async def server_memory_tool(request: ServermemoryRequest):
             if "content" in api_response:
                 content = api_response["content"]
                 if content and len(content) > 0:
-                    print(f"[DEBUG] Content: {content}")
+                    # print(f"[DEBUG] Content: {content}")
                     result_text = content[0].get("text", "")
                     return {"result": result_text}
             
@@ -404,154 +404,6 @@ async def get_server_info():
         "environment": os.getenv("RAILWAY_ENVIRONMENT", "development"),
         "tools": ["sequentialthinking", "server-memory", "get_server_info"]
     }
-
-@app.get("/debug/auth", tags=["Debug"])
-async def debug_auth():
-    """
-    Workers JWT認証の接続テスト
-    
-    Workers MCP Server の JWT 検証エンドポイントへの接続をテストします。
-    認証の問題をデバッグする際に使用してください。
-    """
-    from src.auth import WORKERS_MCP_URL
-    
-    print("[DEBUG] /debug/auth called")
-    result = {
-        "workers_mcp_url": WORKERS_MCP_URL,
-        "connection_test": False,
-        "error": None
-    }
-    
-    if WORKERS_MCP_URL:
-        try:
-            verify_url = f"{WORKERS_MCP_URL}/verify-jwt"
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                # 認証なしでアクセスして401が返ることを確認
-                response = await client.get(verify_url)
-                result["connection_test"] = response.status_code == 401
-                result["status_code"] = response.status_code
-                result["response"] = response.text[:200]
-        except Exception as e:
-            result["error"] = str(e)
-    else:
-        result["error"] = "WORKERS_MCP_URL not set"
-    
-    return result
-
-@app.get("/debug/sequentialthinking", tags=["Debug"])
-async def debug_sequentialthinking():
-    """
-    SequentialThinkingサービスへの接続テスト
-    
-    内部サービスへの接続をテストします。
-    """
-    service_config = INTERNAL_SERVICES["sequentialthinking"]
-    service_url = service_config["url"]
-    
-    result = {
-        "service_url": service_url,
-        "health_check": False,
-        "message_endpoint": False,
-        "error": None
-    }
-    
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # ヘルスチェック
-            try:
-                health_response = await client.get(f"{service_url}/health")
-                result["health_check"] = health_response.status_code == 200
-                result["health_response"] = health_response.json() if health_response.status_code == 200 else None
-            except Exception as e:
-                result["health_error"] = str(e)
-            
-            # HTTPエンドポイントテスト（/api/tools）
-            try:
-                tools_response = await client.get(f"{service_url}/api/tools")
-                result["tools_endpoint"] = tools_response.status_code == 200
-                result["tools_response"] = tools_response.json() if tools_response.status_code == 200 else None
-            except Exception as e:
-                result["tools_error"] = str(e)
-            
-            # ツール実行エンドポイントテスト
-            try:
-                test_thought = {
-                    "thought": "Test thought",
-                    "thoughtNumber": 1,
-                    "totalThoughts": 1,
-                    "nextThoughtNeeded": False
-                }
-                exec_response = await client.post(
-                    f"{service_url}/api/tools/sequentialthinking",
-                    json=test_thought,
-                    headers={"Content-Type": "application/json"}
-                )
-                result["exec_endpoint"] = exec_response.status_code == 200
-                result["exec_response_preview"] = exec_response.text[:500] if exec_response.status_code == 200 else None
-            except Exception as e:
-                result["exec_error"] = str(e)
-                
-    except Exception as e:
-        result["error"] = str(e)
-    
-    return result
-
-@app.get("/debug/server-memory", tags=["Debug"])
-async def debug_server_memory():
-    """
-    Server-Memoryサービスへの接続テスト
-    
-    内部サービスへの接続をテストします。
-    """
-    service_config = INTERNAL_SERVICES["server-memory"]
-    service_url = service_config["url"]
-    
-    result = {
-        "service_url": service_url,
-        "health_check": False,
-        "tools_endpoint": False,
-        "error": None
-    }
-    
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # ヘルスチェック
-            try:
-                health_response = await client.get(f"{service_url}/health")
-                result["health_check"] = health_response.status_code == 200
-                result["health_response"] = health_response.json() if health_response.status_code == 200 else None
-            except Exception as e:
-                result["health_error"] = str(e)
-            
-            # HTTPエンドポイントテスト（/api/tools）
-            try:
-                tools_response = await client.get(f"{service_url}/api/tools")
-                result["tools_endpoint"] = tools_response.status_code == 200
-                result["tools_response"] = tools_response.json() if tools_response.status_code == 200 else None
-            except Exception as e:
-                result["tools_error"] = str(e)
-            
-            # ツール実行エンドポイントテスト
-            try:
-                test_request = {
-                    "operation": "list",
-                    "key": None,
-                    "value": None
-                }
-                exec_response = await client.post(
-                    f"{service_url}/api/tools/server-memory",
-                    json=test_request,
-                    headers={"Content-Type": "application/json"}
-                )
-                result["exec_endpoint"] = exec_response.status_code == 200
-                result["exec_response_preview"] = exec_response.text[:500] if exec_response.status_code == 200 else None
-            except Exception as e:
-                result["exec_error"] = str(e)
-                
-    except Exception as e:
-        result["error"] = str(e)
-    
-    return result
 
 # FastApiMCPを初期化してマウント
 mcp = FastApiMCP(app)
